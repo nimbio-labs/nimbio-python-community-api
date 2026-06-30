@@ -48,10 +48,10 @@ dev = [
 
 [project.urls]
 Homepage = "https://api.nimbio.com"
-Documentation = "https://github.com/nimbio/nimbio-python-community-api#readme"
-Source = "https://github.com/nimbio/nimbio-python-community-api"
-Issues = "https://github.com/nimbio/nimbio-python-community-api/issues"
-Changelog = "https://github.com/nimbio/nimbio-python-community-api/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/nimbio-labs/nimbio-python-community-api#readme"
+Source = "https://github.com/nimbio-labs/nimbio-python-community-api"
+Issues = "https://github.com/nimbio-labs/nimbio-python-community-api/issues"
+Changelog = "https://github.com/nimbio-labs/nimbio-python-community-api/blob/main/CHANGELOG.md"
 
 [tool.hatch.version]
 path = "src/nimbio_community_api/_version.py"

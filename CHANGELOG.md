@@ -24,5 +24,5 @@ adheres to [Semantic Versioning](https://semver.org/).
   retries (429 + 5xx, honoring `Retry-After`).
 - Log pagination helpers (`iter_access_log`, `iter_gate_status_log`).
 
-[Unreleased]: https://github.com/nimbio/nimbio-python-community-api/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/nimbio/nimbio-python-community-api/releases/tag/v0.1.0
+[Unreleased]: https://github.com/nimbio-labs/nimbio-python-community-api/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/nimbio-labs/nimbio-python-community-api/releases/tag/v0.1.0
