@@ -207,10 +207,16 @@ client = NimbioClient("nimbio_test_...", http_client=http)
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
-pytest            # respx-mocked, no network
+pytest                                              # respx-mocked, no network
+pytest --cov=nimbio_community_api --cov-report=term-missing   # with coverage
 ruff check .
 mypy
 ```
+
+The test suite is fully mocked with [`respx`](https://lundberg.github.io/respx/)
+— it never touches the network — and covers every endpoint, the model parsers,
+the error mapping, retries, and transport edge cases (100% line + branch
+coverage; CI enforces a 95% floor).
 
 See [`AGENTS.md`](AGENTS.md) for an LLM/agent-oriented usage cheat sheet and
 [`examples/`](examples/) for runnable scripts.

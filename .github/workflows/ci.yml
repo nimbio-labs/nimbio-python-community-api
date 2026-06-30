@@ -33,4 +33,4 @@ jobs:
         run: mypy
 
       - name: Test
-        run: pytest -q
+        run: pytest -q --cov=nimbio_community_api --cov-report=term-missing --cov-fail-under=95

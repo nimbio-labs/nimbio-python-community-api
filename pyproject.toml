@@ -34,6 +34,7 @@ dependencies = [
 dev = [
     "pytest>=7.4",
     "pytest-asyncio>=0.21",
+    "pytest-cov>=4.1",
     "respx>=0.20",
     "ruff>=0.4",
     "mypy>=1.8",
@@ -66,6 +67,19 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["nimbio_community_api"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.",
+]
 
 [tool.ruff]
 line-length = 90
