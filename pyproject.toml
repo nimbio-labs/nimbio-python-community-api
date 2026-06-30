@@ -31,11 +31,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
+# Just enough to run the test suite (no linters / type-checker) — used by CI
+# test jobs and `tox` for fast, lean installs.
+test = [
     "pytest>=7.4",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.1",
     "respx>=0.20",
+]
+# Everything for local development: the test deps plus lint + type-check.
+dev = [
+    "nimbio-community-api[test]",
     "ruff>=0.4",
     "mypy>=1.8",
 ]

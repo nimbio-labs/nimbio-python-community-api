@@ -213,10 +213,30 @@ ruff check .
 mypy
 ```
 
+Common tasks are wrapped in a `Makefile` (run `make help` to list them):
+
+```bash
+make install     # pip install -e '.[dev]'
+make test        # run the suite
+make check       # lint + type-check + coverage (what CI runs)
+make build       # build sdist + wheel
+```
+
+To run the suite across every installed Python (3.9–3.13) in isolated envs, use
+[`tox`](https://tox.wiki):
+
+```bash
+tox              # all interpreters + lint + type
+tox -e py311     # a single interpreter
+```
+
 The test suite is fully mocked with [`respx`](https://lundberg.github.io/respx/)
 — it never touches the network — and covers every endpoint, the model parsers,
 the error mapping, retries, and transport edge cases (100% line + branch
 coverage; CI enforces a 95% floor).
+
+> Dependency extras: `pip install -e '.[test]'` installs just the test runner;
+> `'.[dev]'` adds ruff + mypy on top.
 
 See [`AGENTS.md`](AGENTS.md) for an LLM/agent-oriented usage cheat sheet and
 [`examples/`](examples/) for runnable scripts.
