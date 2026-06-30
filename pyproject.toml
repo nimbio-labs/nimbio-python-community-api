@@ -1,0 +1,81 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nimbio-community-api"
+dynamic = ["version"]
+description = "Official Python client for the Nimbio community API (api.nimbio.com) — sync + async."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Nimbio" }]
+keywords = ["nimbio", "api", "client", "sdk", "community", "access-control", "gate"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "httpx>=0.23,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-asyncio>=0.21",
+    "respx>=0.20",
+    "ruff>=0.4",
+    "mypy>=1.8",
+]
+
+[project.urls]
+Homepage = "https://api.nimbio.com"
+Documentation = "https://github.com/nimbio/nimbio-python-community-api#readme"
+Source = "https://github.com/nimbio/nimbio-python-community-api"
+Issues = "https://github.com/nimbio/nimbio-python-community-api/issues"
+Changelog = "https://github.com/nimbio/nimbio-python-community-api/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/nimbio_community_api/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nimbio_community_api"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/examples",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/AGENTS.md",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 90
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+files = ["src"]
