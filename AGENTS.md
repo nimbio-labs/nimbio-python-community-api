@@ -31,7 +31,15 @@ client = NimbioClient("nimbio_test_...", base_url="http://localhost:8000")
   gate / sends a real message. Check with `client.mode` → `"test"` | `"live"`.
 - Env vars: `NIMBIO_API_KEY`, `NIMBIO_ENV`, `NIMBIO_BASE_URL`.
 
-## The whole API (sync — drop the `with`/use `await` for async)
+## The whole SDK surface (sync — drop the `with`/use `await` for async)
+
+This is every method the SDK exposes. Note the SDK is **community-scoped by
+design**: it covers `/v1/me`, `/healthz`, and the whole `/v1/community/*`
+surface, but deliberately does not wrap the service's Account surface
+(`/v1/account/keys`, `/v1/account/keys/{key_id}/latches/{latch_id}/open`, or the
+hidden `/v1/keys*` / `/v1/calls*` endpoints). That gap is intentional and
+expected to stay (as of 2026-07-16) — call those endpoints over plain HTTPS if
+you need them.
 
 ```python
 with NimbioClient("nimbio_test_...") as client:
