@@ -55,11 +55,11 @@ Keep coverage at/near 100% (CI enforces a 95% floor). `AGENTS.md` is the LLM/age
 ## Releasing
 
 1. Bump `__version__` in `src/nimbio_community_api/_version.py` and add a dated section to `CHANGELOG.md`.
-2. Update the customer-facing changelogs in `nimbioCore` (`changelogs/python-sdk.md` and `marketing-changelogs/python-sdk.md`).
+2. Update the customer-facing changelogs in `nimbioCore` (`nimbioCore/changelogs/python-sdk.md` and `nimbioCore/marketing-changelogs/python-sdk.md`).
 3. Tag `vX.Y.Z` and push the tag — `.github/workflows/publish.yml` builds and publishes to PyPI via Trusted Publishing (OIDC; no stored token). A PyPI version cannot be re-uploaded, so only tag when ready.
 
 ## Related
 
 - `nimbio-public-api` — the REST service this client wraps (endpoint contracts, auth, scope model).
-- `nimbioCore/changelogs/python-sdk.md` + `marketing-changelogs/python-sdk.md` — customer-facing changelogs.
+- `nimbioCore/changelogs/python-sdk.md` + `nimbioCore/marketing-changelogs/python-sdk.md` — customer-facing changelogs.
 - `CHANGELOG.md` (this repo) — technical changelog for GitHub releases.
