@@ -31,8 +31,7 @@ real (live) or simulated (test) action is determined by the API key itself.
 
 from __future__ import annotations
 
-from . import models
-from . import webhooks
+from . import models, webhooks
 from ._async import AsyncNimbioClient
 from ._environments import DEFAULT_ENVIRONMENT, ENVIRONMENTS
 from ._exceptions import (
