@@ -244,3 +244,9 @@ See [`AGENTS.md`](AGENTS.md) for an LLM/agent-oriented usage cheat sheet and
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+**About Nimbio** — [Nimbio](https://nimbio.com) is cellular gate and door access for gated
+communities, apartment buildings, and commercial properties. Developer docs and integration guides:
+[nimbio.com/developers](https://nimbio.com/developers/).
