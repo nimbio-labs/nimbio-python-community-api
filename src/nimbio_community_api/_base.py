@@ -223,6 +223,25 @@ class endpoints:
         return "GET", "/v1/me", None, None, _m.Me.from_dict
 
     @staticmethod
+    def account_keys(include_hidden: bool = False):
+        return ("GET", "/v1/account/keys",
+                {"include_hidden": "true"} if include_hidden else None, None,
+                lambda d: [_m.AccountKey.from_dict(k)
+                           for k in ((d or {}).get("keys") or [])])
+
+    @staticmethod
+    def account_open(key_id: str, latch_id: str, note: Optional[str] = None,
+                     idempotency_key: Optional[str] = None):
+        body: dict = {}
+        if note is not None:
+            body["note"] = note
+        if idempotency_key is not None:
+            body["idempotency_key"] = idempotency_key
+        return ("POST",
+                f"/v1/account/keys/{_enc(key_id)}/latches/{_enc(latch_id)}/open",
+                None, body, _m.OpenResult.from_dict)
+
+    @staticmethod
     def gate_status():
         return ("GET", "/v1/community/gate-status", None, None,
                 _m.GateStatus.from_dict)
@@ -301,3 +320,82 @@ class endpoints:
     def gate_status_log(page: int = 0):
         return ("GET", "/v1/community/gate-status-log", {"page": page}, None,
                 _m.GateStatusLogPage.from_dict)
+
+    # -- hold opens ----------------------------------------------------- #
+
+    @staticmethod
+    def hold_opens():
+        return ("GET", "/v1/community/hold-opens", None, None,
+                _m.HoldOpens.from_dict)
+
+    @staticmethod
+    def set_hold_open(latch_id: str, state: bool):
+        return ("PUT", f"/v1/community/latches/{_enc(latch_id)}/hold-open",
+                None, {"state": bool(state)}, _m.ManualHoldOpenResult.from_dict)
+
+    @staticmethod
+    def add_hold_open_event(latch_id: str, start: str, end: str):
+        return ("POST",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/events",
+                None, {"start": start, "end": end},
+                _m.HoldOpenEventAdded.from_dict)
+
+    @staticmethod
+    def remove_hold_open_event(latch_id: str, event_id: str):
+        return ("DELETE",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/events/"
+                f"{_enc(event_id)}",
+                None, None, _m.HoldOpenEventRemoved.from_dict)
+
+    # -- webhooks -------------------------------------------------------- #
+
+    @staticmethod
+    def webhook_event_types():
+        return ("GET", "/v1/community/webhook-events", None, None,
+                lambda d: list((d or {}).get("events") or []))
+
+    @staticmethod
+    def webhooks():
+        return ("GET", "/v1/community/webhooks", None, None,
+                lambda d: [_m.Webhook.from_dict(x)
+                           for x in ((d or {}).get("webhooks") or [])])
+
+    @staticmethod
+    def create_webhook(url: str, events: Any, description: Optional[str] = None):
+        body: dict = {"url": url, "events": list(events)}
+        if description is not None:
+            body["description"] = description
+        return ("POST", "/v1/community/webhooks", None, body,
+                _m.WebhookCreateResult.from_dict)
+
+    @staticmethod
+    def update_webhook(webhook_id: str, url: Optional[str] = None,
+                       events: Any = None, active: Optional[bool] = None,
+                       description: Optional[str] = None):
+        body: dict = {}
+        if url is not None:
+            body["url"] = url
+        if events is not None:
+            body["events"] = list(events)
+        if active is not None:
+            body["active"] = active
+        if description is not None:
+            body["description"] = description
+        return ("PATCH", f"/v1/community/webhooks/{_enc(webhook_id)}",
+                None, body, _m.WebhookCreateResult.from_dict)
+
+    @staticmethod
+    def delete_webhook(webhook_id: str):
+        return ("DELETE", f"/v1/community/webhooks/{_enc(webhook_id)}",
+                None, None, _m.WriteResult.from_dict)
+
+    @staticmethod
+    def rotate_webhook_secret(webhook_id: str):
+        return ("POST",
+                f"/v1/community/webhooks/{_enc(webhook_id)}/rotate-secret",
+                None, None, _m.WebhookSecret.from_dict)
+
+    @staticmethod
+    def test_webhook(webhook_id: str):
+        return ("POST", f"/v1/community/webhooks/{_enc(webhook_id)}/test",
+                None, None, _m.WriteResult.from_dict)

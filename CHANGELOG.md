@@ -5,6 +5,36 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Account surface for account-scoped (member) keys: `client.account.keys()`
+  (your keys with latches nested) and `client.account.open(key_id, latch_id)`
+  — sync + async. Enables member-key integrations (e.g. Home Assistant)
+  without bespoke HTTP.
+- Hold-open control surface: `client.community.hold_opens()`,
+  `set_hold_open(latch_id, state)` (manual toggle),
+  `add_hold_open_event(latch_id, start=..., end=...)` (one-time timed window),
+  and `remove_hold_open_event(latch_id, event_id)` — with typed `HoldOpens` /
+  `ManualHoldOpenResult` / `HoldOpenEventAdded` / `HoldOpenEventRemoved`
+  models. Available on both the sync and async clients.
+- Webhook self-management: `webhook_event_types()`, `webhooks()`,
+  `create_webhook()`, `update_webhook()`, `delete_webhook()`,
+  `rotate_webhook_secret()`, and `test_webhook()`. The signing secret is
+  returned once on create/rotate.
+- New `nimbio_community_api.webhooks` module for verifying webhook
+  deliveries: `compute_signature`, `verify_signature`, `construct_event`, and
+  `WebhookSignatureError` — Stripe-style `sha256=<hex>` HMAC over
+  `"{timestamp}.{body}"` with a replay-tolerance window.
+- `me().key` now carries `type` (`"account"` | `"community"`),
+  `community_id`, and a `capabilities` list for feature discovery.
+- `Latch.possible_statuses` — the latch's configured status vocabulary
+  (`PossibleStatus(status, transient)`) from `community.gate_status()`, for
+  classifying a latch without hardcoding label sets.
+
+### Notes
+- Gate-status, key-statuses, hold-opens reads and `/v1/me` no longer consume
+  the key's monthly quota server-side (per-minute limit still applies), so
+  polling integrations can re-sync freely.
+
 ## [0.1.0] - 2026-06-30
 
 ### Added

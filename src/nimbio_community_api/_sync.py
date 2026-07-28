@@ -10,6 +10,7 @@ import httpx
 from . import _exceptions as exc
 from ._base import BaseClient, endpoints
 from .models import (
+    AccountKey,
     AccessLogEntry,
     AccessLogPage,
     CommunityKey,
@@ -17,11 +18,18 @@ from .models import (
     GateStatusLogEntry,
     GateStatusLogPage,
     Health,
+    HoldOpenEventAdded,
+    HoldOpenEventRemoved,
+    HoldOpens,
     KeyStatuses,
+    ManualHoldOpenResult,
     Me,
     MemberAccessLogPage,
     Members,
     OpenResult,
+    Webhook,
+    WebhookCreateResult,
+    WebhookSecret,
     WriteResult,
 )
 
@@ -57,6 +65,7 @@ class NimbioClient(BaseClient):
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=self.timeout)
         self.community = _SyncCommunity(self)
+        self.account = _SyncAccount(self)
 
     # -- lifecycle ---------------------------------------------------------- #
 
@@ -116,6 +125,30 @@ class NimbioClient(BaseClient):
     def me(self) -> Me:
         """Metadata and live usage counters for the authenticating key."""
         return self._request(endpoints.me())
+
+
+class _SyncAccount:
+    """``client.account.*`` — account-scoped operations (your own keys).
+
+    Requires an account-scoped API key; community-scoped keys raise
+    :class:`PermissionDeniedError` (``not_account_key``).
+    """
+
+    def __init__(self, client: NimbioClient) -> None:
+        self._c = client
+
+    def keys(self, *, include_hidden: bool = False) -> List[AccountKey]:
+        """Every Nimbio key on your account, with its latches nested."""
+        return self._c._request(endpoints.account_keys(include_hidden))
+
+    def open(self, key_id: str, latch_id: str, *, note: Optional[str] = None,
+             idempotency_key: Optional[str] = None) -> OpenResult:
+        """Open one of your latches through one of your keys. Live keys fire
+        the gate (synchronous, blocks until the box confirms); test keys
+        simulate. Denials raise :class:`PermissionDeniedError`; a
+        non-confirming gate raises :class:`GateNotOpenedError`."""
+        return self._c._request(
+            endpoints.account_open(key_id, latch_id, note, idempotency_key))
 
 
 class _SyncCommunity:
@@ -181,6 +214,72 @@ class _SyncCommunity:
         """Disable or re-enable a member's keys (reversible — keys not removed)."""
         return self._c._request(
             endpoints.set_keys_disabled(account_community_id, key_ids, disabled))
+
+    # -- hold opens ---------------------------------------------------------- #
+
+    def hold_opens(self) -> HoldOpens:
+        """Hold-open state per latch: the combined ``held_open`` truth, the
+        ``manual`` toggle, one-time ``events``, and ``recurring`` schedules.
+        Requires the community's Hold Opens feature to be enabled."""
+        return self._c._request(endpoints.hold_opens())
+
+    def set_hold_open(self, latch_id: str, state: bool) -> ManualHoldOpenResult:
+        """Turn the manual hold open on/off for a latch. ``manual`` reflects
+        only this toggle; turning it off does not cancel an active scheduled
+        window. Test keys simulate."""
+        return self._c._request(endpoints.set_hold_open(latch_id, state))
+
+    def add_hold_open_event(self, latch_id: str, *, start: str,
+                            end: str) -> HoldOpenEventAdded:
+        """Add a one-time hold-open window ('YYYY-MM-DD HH:MM', latch-local
+        time). Keep the returned ``event_id`` to end the window early."""
+        return self._c._request(
+            endpoints.add_hold_open_event(latch_id, start, end))
+
+    def remove_hold_open_event(self, latch_id: str,
+                               event_id: str) -> HoldOpenEventRemoved:
+        """Remove a one-time hold-open window early. Idempotent."""
+        return self._c._request(
+            endpoints.remove_hold_open_event(latch_id, event_id))
+
+    # -- webhooks ------------------------------------------------------------ #
+
+    def webhook_event_types(self) -> List[str]:
+        """The catalog of event types a webhook can subscribe to."""
+        return self._c._request(endpoints.webhook_event_types())
+
+    def webhooks(self) -> List[Webhook]:
+        """All webhooks registered on the community (secrets never listed)."""
+        return self._c._request(endpoints.webhooks())
+
+    def create_webhook(self, url: str, events: Sequence[str], *,
+                       description: Optional[str] = None) -> WebhookCreateResult:
+        """Register a webhook (public https only). The HMAC signing secret is
+        on ``.webhook.secret`` of the result — returned ONCE, store it. Verify
+        deliveries with :mod:`nimbio_community_api.webhooks`."""
+        return self._c._request(
+            endpoints.create_webhook(url, events, description))
+
+    def update_webhook(self, webhook_id: str, *, url: Optional[str] = None,
+                       events: Optional[Sequence[str]] = None,
+                       active: Optional[bool] = None,
+                       description: Optional[str] = None) -> WebhookCreateResult:
+        """Edit a webhook; ``active=True`` revives an auto-disabled one."""
+        return self._c._request(endpoints.update_webhook(
+            webhook_id, url=url, events=events, active=active,
+            description=description))
+
+    def delete_webhook(self, webhook_id: str) -> WriteResult:
+        """Delete a webhook and its subscriptions."""
+        return self._c._request(endpoints.delete_webhook(webhook_id))
+
+    def rotate_webhook_secret(self, webhook_id: str) -> WebhookSecret:
+        """Mint a new signing secret (returned once); the old one stops working."""
+        return self._c._request(endpoints.rotate_webhook_secret(webhook_id))
+
+    def test_webhook(self, webhook_id: str) -> WriteResult:
+        """Queue a synthetic ``ping`` delivery to verify connectivity."""
+        return self._c._request(endpoints.test_webhook(webhook_id))
 
     # -- logs --------------------------------------------------------------- #
 

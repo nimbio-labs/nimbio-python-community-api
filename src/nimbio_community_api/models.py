@@ -32,6 +32,9 @@ class ApiKeyInfo:
     prefix: Optional[str]
     name: Optional[str]
     mode: Optional[str]  # "test" | "live"
+    type: Optional[str]  # "account" | "community"
+    community_id: Optional[str]
+    capabilities: List[str]
     last_used_datetime: Optional[str]
     minute_limit: Optional[int]
     minute_count: Optional[int]
@@ -47,11 +50,16 @@ class ApiKeyInfo:
             prefix=d.get("prefix"),
             name=d.get("name"),
             mode=d.get("mode"),
+            type=d.get("type"),
+            community_id=d.get("community_id"),
+            capabilities=list(d.get("capabilities") or []),
             last_used_datetime=d.get("last_used_datetime"),
-            minute_limit=d.get("minute_limit"),
-            minute_count=d.get("minute_count"),
-            month_limit=d.get("month_limit"),
-            month_count=d.get("month_count"),
+            # Servers before the 2026-07 fix emitted only the legacy names
+            # (calls_this_minute, ...) — accept both.
+            minute_limit=d.get("minute_limit", d.get("rate_limit_per_minute")),
+            minute_count=d.get("minute_count", d.get("calls_this_minute")),
+            month_limit=d.get("month_limit", d.get("quota_per_month")),
+            month_count=d.get("month_count", d.get("calls_this_month")),
             raw=d,
         )
 
@@ -93,14 +101,34 @@ class Health:
 # --------------------------------------------------------------------------- #
 
 @dataclass
+class PossibleStatus:
+    """One entry of a latch's configured status vocabulary."""
+
+    status: Optional[str]
+    transient: bool
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "PossibleStatus":
+        d = _d(raw)
+        return cls(status=d.get("status"), transient=bool(d.get("transient")), raw=d)
+
+
+@dataclass
 class Latch:
-    """One latch and its latest sensed physical state."""
+    """One latch and its latest sensed physical state.
+
+    ``possible_statuses`` is the latch's configured status vocabulary (empty
+    when no sensing is configured) — use it to classify the latch (e.g. a
+    Locked/Unlocked door vs an Open/Closed gate) instead of hardcoding labels.
+    """
 
     latch_id: Optional[str]
     latch_name: Optional[str]
     status: Optional[str]
     offline: bool
     message: Optional[str]
+    possible_statuses: List[PossibleStatus] = field(default_factory=list)
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @classmethod
@@ -112,6 +140,8 @@ class Latch:
             status=d.get("status"),
             offline=bool(d.get("offline")),
             message=d.get("latch_status_current_message"),
+            possible_statuses=[PossibleStatus.from_dict(x)
+                               for x in (d.get("possible_statuses") or [])],
             raw=d,
         )
 
@@ -447,5 +477,292 @@ class GateStatusLogPage:
             has_more=bool(d.get("has_more")),
             date_from=d.get("from"),
             date_to=d.get("to"),
+            raw=d,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Hold opens
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class HoldOpenLatch:
+    """Hold-open state for one latch.
+
+    ``held_open`` is the combined truth (manual OR an active one-time /
+    recurring window); ``manual`` reflects only the manual toggle. ``events``
+    and ``recurring`` are the raw window dicts as returned by the server.
+    """
+
+    latch_id: Optional[str]
+    latch_name: Optional[str]
+    held_open: bool
+    manual: bool
+    disabled_until: Optional[str]
+    timezone: Optional[str]
+    events: List[Dict[str, Any]] = field(default_factory=list)
+    recurring: List[Dict[str, Any]] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "HoldOpenLatch":
+        d = _d(raw)
+        return cls(
+            latch_id=d.get("latch_id"),
+            latch_name=d.get("latch_name"),
+            held_open=bool(d.get("held_open")),
+            manual=bool(d.get("manual")),
+            disabled_until=d.get("disabled_until"),
+            timezone=d.get("timezone"),
+            events=list(d.get("events") or []),
+            recurring=list(d.get("recurring") or []),
+            raw=d,
+        )
+
+
+@dataclass
+class HoldOpens:
+    """Result of :meth:`community.hold_opens` — hold-open state per latch."""
+
+    latches: Dict[str, HoldOpenLatch]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "HoldOpens":
+        d = _d(raw)
+        entries = d.get("hold_opens") or {}
+        return cls(
+            latches={k: HoldOpenLatch.from_dict(v) for k, v in entries.items()
+                     if isinstance(v, dict)},
+            raw=d,
+        )
+
+
+@dataclass
+class ManualHoldOpenResult:
+    """Result of :meth:`community.set_hold_open`."""
+
+    result: Optional[str]
+    latch_id: Optional[str]
+    manual: Optional[bool]
+    held_open: Optional[bool]
+    request_id: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "ManualHoldOpenResult":
+        d = _d(raw)
+        return cls(
+            result=d.get("result"),
+            latch_id=d.get("latch_id"),
+            manual=d.get("manual"),
+            held_open=d.get("held_open"),
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+@dataclass
+class HoldOpenEventAdded:
+    """Result of :meth:`community.add_hold_open_event` — keep ``event_id`` to
+    end the window early via :meth:`community.remove_hold_open_event`."""
+
+    result: Optional[str]
+    event_id: Optional[str]
+    latch_id: Optional[str]
+    request_id: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "HoldOpenEventAdded":
+        d = _d(raw)
+        return cls(
+            result=d.get("result"),
+            event_id=d.get("event_id"),
+            latch_id=d.get("latch_id"),
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+@dataclass
+class HoldOpenEventRemoved:
+    """Result of :meth:`community.remove_hold_open_event`. ``removed`` is
+    False on an idempotent re-remove (the window was already gone)."""
+
+    result: Optional[str]
+    removed: bool
+    request_id: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "HoldOpenEventRemoved":
+        d = _d(raw)
+        return cls(
+            result=d.get("result"),
+            removed=bool(d.get("removed")),
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Webhooks
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class Webhook:
+    """One outbound webhook registration.
+
+    ``secret`` is populated ONLY on the create / rotate-secret responses —
+    store it then; it is never returned again.
+    """
+
+    webhook_id: Optional[str]
+    url: Optional[str]
+    events: List[str]
+    description: Optional[str]
+    active: Optional[bool]
+    disabled: Optional[bool]
+    secret: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "Webhook":
+        d = _d(raw)
+        return cls(
+            webhook_id=d.get("webhook_id"),
+            url=d.get("url"),
+            events=list(d.get("events") or []),
+            description=d.get("description"),
+            active=d.get("active"),
+            disabled=d.get("disabled"),
+            secret=d.get("secret"),
+            raw=d,
+        )
+
+
+@dataclass
+class WebhookCreateResult:
+    """Result of :meth:`community.create_webhook`."""
+
+    result: Optional[str]
+    webhook: Optional[Webhook]
+    request_id: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @property
+    def secret(self) -> Optional[str]:
+        return self.webhook.secret if self.webhook else None
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "WebhookCreateResult":
+        d = _d(raw)
+        wh = d.get("webhook")
+        return cls(
+            result=d.get("result"),
+            webhook=Webhook.from_dict(wh) if isinstance(wh, dict) else None,
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+@dataclass
+class WebhookSecret:
+    """Result of :meth:`community.rotate_webhook_secret` — the new secret,
+    returned once."""
+
+    result: Optional[str]
+    webhook_id: Optional[str]
+    secret: Optional[str]
+    request_id: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "WebhookSecret":
+        d = _d(raw)
+        return cls(
+            result=d.get("result"),
+            webhook_id=d.get("webhook_id"),
+            secret=d.get("secret"),
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Account surface (account-scoped keys)
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class AccountLatch:
+    """One latch reachable through one of your account's keys."""
+
+    id: Optional[str]
+    name: Optional[str]
+    offline: bool
+    location: Optional[str]
+    held_open: bool
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountLatch":
+        d = _d(raw)
+        return cls(
+            id=d.get("id"),
+            name=d.get("name"),
+            offline=bool(d.get("offline")),
+            location=d.get("location"),
+            held_open=bool(d.get("held_open")),
+            raw=d,
+        )
+
+
+@dataclass
+class AccountKey:
+    """One of your account's Nimbio keys, with its latches nested."""
+
+    id: Optional[str]
+    name: Optional[str]
+    home: Optional[str]
+    disabled: bool
+    hidden: bool
+    pending: bool
+    parent_name: Optional[str]
+    latches: List[AccountLatch] = field(default_factory=list)
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountKey":
+        d = _d(raw)
+        return cls(
+            id=d.get("id"),
+            name=d.get("name"),
+            home=d.get("home"),
+            disabled=bool(d.get("disabled")),
+            hidden=bool(d.get("hidden")),
+            pending=bool(d.get("pending")),
+            parent_name=d.get("parent_name"),
+            latches=[AccountLatch.from_dict(x) for x in (d.get("latches") or [])],
             raw=d,
         )

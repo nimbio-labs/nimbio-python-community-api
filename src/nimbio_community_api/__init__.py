@@ -32,6 +32,7 @@ real (live) or simulated (test) action is determined by the API key itself.
 from __future__ import annotations
 
 from . import models
+from . import webhooks
 from ._async import AsyncNimbioClient
 from ._environments import DEFAULT_ENVIRONMENT, ENVIRONMENTS
 from ._exceptions import (
@@ -62,6 +63,8 @@ __all__ = [
     "DEFAULT_ENVIRONMENT",
     # models module (typed response objects)
     "models",
+    # webhook delivery verification (HMAC)
+    "webhooks",
     # exceptions
     "NimbioError",
     "NimbioConfigError",

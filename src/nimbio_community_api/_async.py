@@ -10,6 +10,7 @@ import httpx
 from . import _exceptions as exc
 from ._base import BaseClient, endpoints
 from .models import (
+    AccountKey,
     AccessLogEntry,
     AccessLogPage,
     CommunityKey,
@@ -17,11 +18,18 @@ from .models import (
     GateStatusLogEntry,
     GateStatusLogPage,
     Health,
+    HoldOpenEventAdded,
+    HoldOpenEventRemoved,
+    HoldOpens,
     KeyStatuses,
+    ManualHoldOpenResult,
     Me,
     MemberAccessLogPage,
     Members,
     OpenResult,
+    Webhook,
+    WebhookCreateResult,
+    WebhookSecret,
     WriteResult,
 )
 
@@ -61,6 +69,7 @@ class AsyncNimbioClient(BaseClient):
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=self.timeout)
         self.community = _AsyncCommunity(self)
+        self.account = _AsyncAccount(self)
 
     # -- lifecycle ---------------------------------------------------------- #
 
@@ -122,6 +131,22 @@ class AsyncNimbioClient(BaseClient):
         return await self._request(endpoints.me())
 
 
+class _AsyncAccount:
+    """``client.account.*`` — account-scoped operations (async)."""
+
+    def __init__(self, client: AsyncNimbioClient) -> None:
+        self._c = client
+
+    async def keys(self, *, include_hidden: bool = False) -> List[AccountKey]:
+        return await self._c._request(endpoints.account_keys(include_hidden))
+
+    async def open(self, key_id: str, latch_id: str, *,
+                   note: Optional[str] = None,
+                   idempotency_key: Optional[str] = None) -> OpenResult:
+        return await self._c._request(
+            endpoints.account_open(key_id, latch_id, note, idempotency_key))
+
+
 class _AsyncCommunity:
     """``client.community.*`` — community-scoped operations (async)."""
 
@@ -172,6 +197,59 @@ class _AsyncCommunity:
                                 disabled: bool) -> WriteResult:
         return await self._c._request(
             endpoints.set_keys_disabled(account_community_id, key_ids, disabled))
+
+    # -- hold opens ---------------------------------------------------------- #
+
+    async def hold_opens(self) -> HoldOpens:
+        return await self._c._request(endpoints.hold_opens())
+
+    async def set_hold_open(self, latch_id: str,
+                            state: bool) -> ManualHoldOpenResult:
+        return await self._c._request(endpoints.set_hold_open(latch_id, state))
+
+    async def add_hold_open_event(self, latch_id: str, *, start: str,
+                                  end: str) -> HoldOpenEventAdded:
+        return await self._c._request(
+            endpoints.add_hold_open_event(latch_id, start, end))
+
+    async def remove_hold_open_event(self, latch_id: str,
+                                     event_id: str) -> HoldOpenEventRemoved:
+        return await self._c._request(
+            endpoints.remove_hold_open_event(latch_id, event_id))
+
+    # -- webhooks ------------------------------------------------------------ #
+
+    async def webhook_event_types(self) -> List[str]:
+        return await self._c._request(endpoints.webhook_event_types())
+
+    async def webhooks(self) -> List[Webhook]:
+        return await self._c._request(endpoints.webhooks())
+
+    async def create_webhook(self, url: str, events: Sequence[str], *,
+                             description: Optional[str] = None
+                             ) -> WebhookCreateResult:
+        return await self._c._request(
+            endpoints.create_webhook(url, events, description))
+
+    async def update_webhook(self, webhook_id: str, *,
+                             url: Optional[str] = None,
+                             events: Optional[Sequence[str]] = None,
+                             active: Optional[bool] = None,
+                             description: Optional[str] = None
+                             ) -> WebhookCreateResult:
+        return await self._c._request(endpoints.update_webhook(
+            webhook_id, url=url, events=events, active=active,
+            description=description))
+
+    async def delete_webhook(self, webhook_id: str) -> WriteResult:
+        return await self._c._request(endpoints.delete_webhook(webhook_id))
+
+    async def rotate_webhook_secret(self, webhook_id: str) -> WebhookSecret:
+        return await self._c._request(
+            endpoints.rotate_webhook_secret(webhook_id))
+
+    async def test_webhook(self, webhook_id: str) -> WriteResult:
+        return await self._c._request(endpoints.test_webhook(webhook_id))
 
     # -- logs --------------------------------------------------------------- #
 
