@@ -5,6 +5,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-28
+
 ### Added
 - Account surface for account-scoped (member) keys: `client.account.keys()`
   (your keys with latches nested) and `client.account.open(key_id, latch_id)`
