@@ -3,7 +3,7 @@
 All notable changes to `nimbio-community-api` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-07-31
 
 ### Added
 - Live event stream: `client.community.stream_events()` (sync and async) —
