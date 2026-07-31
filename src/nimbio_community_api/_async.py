@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, List, Optional, Sequence
+from typing import Any, AsyncIterator, List, Optional, Sequence, Union
 
 import httpx
 
 from . import _exceptions as exc
+from . import _sse
 from ._base import BaseClient, endpoints
 from .models import (
     AccessLogEntry,
@@ -27,6 +28,8 @@ from .models import (
     MemberAccessLogPage,
     Members,
     OpenResult,
+    StreamEvent,
+    StreamReset,
     Webhook,
     WebhookCreateResult,
     WebhookSecret,
@@ -250,6 +253,57 @@ class _AsyncCommunity:
 
     async def test_webhook(self, webhook_id: str) -> WriteResult:
         return await self._c._request(endpoints.test_webhook(webhook_id))
+
+    # -- live events --------------------------------------------------------- #
+
+    async def stream_events(self, *, events: Optional[Sequence[str]] = None,
+                            last_event_id: Optional[str] = None,
+                            reconnect: bool = True,
+                            ) -> AsyncIterator[Union[StreamEvent, StreamReset]]:
+        """Async-iterate the community's live events over SSE. Semantics match
+        :meth:`NimbioClient.community.stream_events` — StreamEvent per event,
+        StreamReset when a reconnect gap can't be replayed (re-seed via the
+        status reads), automatic reconnect with backoff, HTTP errors raise."""
+        c = self._c
+        cursor = last_event_id
+        attempt = 0
+        while True:
+            prepared = c._prepare("GET", _sse.STREAM_PATH,
+                                  params=_sse.stream_params(events, cursor))
+            timeout = httpx.Timeout(c.timeout or 30.0,
+                                    read=_sse.STREAM_READ_TIMEOUT)
+            try:
+                async with c._http.stream(prepared.method, prepared.url,
+                                          headers=prepared.headers,
+                                          params=prepared.params,
+                                          timeout=timeout) as resp:
+                    if resp.status_code != 200:
+                        await resp.aread()
+                        payload = c._decode(resp.status_code, resp.content,
+                                            resp.headers)
+                        c._parse(resp.status_code, payload, resp.headers)
+                    parser = _sse.SSEParser()
+                    async for line in resp.aiter_lines():
+                        frame = parser.feed(line)
+                        if frame is None:
+                            continue
+                        model = _sse.frame_to_model(frame)
+                        if model is None:
+                            continue
+                        attempt = 0
+                        cursor = None if isinstance(model, StreamReset) else model.id
+                        yield model
+            except httpx.TimeoutException as e:
+                if not reconnect:
+                    raise exc.APITimeoutError(cause=e) from e
+            except httpx.HTTPError as e:
+                if not reconnect:
+                    raise exc.APIConnectionError(str(e) or "Connection error",
+                                                 cause=e) from e
+            if not reconnect:
+                return
+            await asyncio.sleep(_sse.backoff_delay(attempt))
+            attempt += 1
 
     # -- logs --------------------------------------------------------------- #
 

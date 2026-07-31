@@ -766,3 +766,38 @@ class AccountKey:
             latches=[AccountLatch.from_dict(x) for x in (d.get("latches") or [])],
             raw=d,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Live event stream (SSE)
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class StreamEvent:
+    """One live event from ``stream_events()``.
+
+    ``data`` is the exact JSON body a webhook receiver gets for the same
+    event: ``{"event", "id", "community_id", "occurred_at", "data": {...}}``
+    — the event-specific fields live under ``data["data"]``.
+    """
+
+    id: str
+    type: str  # e.g. "sense_line.changed", "hold_open.changed"
+    data: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def payload(self) -> Dict[str, Any]:
+        """The event-specific fields (``data["data"]``)."""
+        inner = self.data.get("data")
+        return inner if isinstance(inner, dict) else {}
+
+
+@dataclass
+class StreamReset:
+    """Marker yielded when the server cannot replay the requested cursor.
+
+    The client's local picture may be stale: re-seed state via the status
+    reads (``gate_status()`` / ``hold_opens()``), then keep iterating.
+    """
+
+    reason: Optional[str] = None

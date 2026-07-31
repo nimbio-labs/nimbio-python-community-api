@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Iterator, List, Optional, Sequence
+from typing import Any, Iterator, List, Optional, Sequence, Union
 
 import httpx
 
 from . import _exceptions as exc
+from . import _sse
 from ._base import BaseClient, endpoints
 from .models import (
     AccessLogEntry,
@@ -27,6 +28,8 @@ from .models import (
     MemberAccessLogPage,
     Members,
     OpenResult,
+    StreamEvent,
+    StreamReset,
     Webhook,
     WebhookCreateResult,
     WebhookSecret,
@@ -280,6 +283,70 @@ class _SyncCommunity:
     def test_webhook(self, webhook_id: str) -> WriteResult:
         """Queue a synthetic ``ping`` delivery to verify connectivity."""
         return self._c._request(endpoints.test_webhook(webhook_id))
+
+    # -- live events --------------------------------------------------------- #
+
+    def stream_events(self, *, events: Optional[Sequence[str]] = None,
+                      last_event_id: Optional[str] = None,
+                      reconnect: bool = True,
+                      ) -> Iterator[Union[StreamEvent, StreamReset]]:
+        """Iterate the community's live events over SSE — the same payloads
+        webhooks deliver, pushed over an outbound connection (works behind
+        NAT, no public endpoint needed).
+
+        Yields a :class:`~nimbio_community_api.models.StreamEvent` per event,
+        and a :class:`~nimbio_community_api.models.StreamReset` when the
+        server cannot replay a reconnect gap — re-seed via the status reads
+        (``gate_status()`` / ``hold_opens()``), then keep iterating.
+
+        With ``reconnect=True`` (default) dropped connections re-open with
+        exponential backoff, resuming from the last seen event id. HTTP errors
+        (401, 403, 429 ``stream_limit``, ...) always raise. Connecting charges
+        one per-minute request and is monthly-quota-exempt; delivered events
+        are free.
+        """
+        c = self._c
+        cursor = last_event_id
+        attempt = 0
+        while True:
+            prepared = c._prepare("GET", _sse.STREAM_PATH,
+                                  params=_sse.stream_params(events, cursor))
+            timeout = httpx.Timeout(c.timeout or 30.0,
+                                    read=_sse.STREAM_READ_TIMEOUT)
+            try:
+                with c._http.stream(prepared.method, prepared.url,
+                                    headers=prepared.headers,
+                                    params=prepared.params,
+                                    timeout=timeout) as resp:
+                    if resp.status_code != 200:
+                        resp.read()
+                        payload = c._decode(resp.status_code, resp.content,
+                                            resp.headers)
+                        c._parse(resp.status_code, payload, resp.headers)
+                    parser = _sse.SSEParser()
+                    for line in resp.iter_lines():
+                        frame = parser.feed(line)
+                        if frame is None:
+                            continue
+                        model = _sse.frame_to_model(frame)
+                        if model is None:
+                            continue
+                        attempt = 0
+                        cursor = None if isinstance(model, StreamReset) else model.id
+                        yield model
+            except httpx.TimeoutException as e:
+                if not reconnect:
+                    raise exc.APITimeoutError(cause=e) from e
+            except httpx.HTTPError as e:
+                if not reconnect:
+                    raise exc.APIConnectionError(str(e) or "Connection error",
+                                                 cause=e) from e
+            # Stream ended (server close / deploy / slow-client drop) or a
+            # transport error with reconnect enabled: back off and resume.
+            if not reconnect:
+                return
+            time.sleep(_sse.backoff_delay(attempt))
+            attempt += 1
 
     # -- logs --------------------------------------------------------------- #
 

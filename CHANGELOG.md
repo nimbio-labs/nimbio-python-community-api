@@ -5,6 +5,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Live event stream: `client.community.stream_events()` (sync and async) —
+  Server-Sent Events from `GET /v1/events/stream`, carrying the exact webhook
+  event payloads (`sense_line.changed`, `hold_open.changed`, `open.*`,
+  `device.*`, `member.*`, `directory.call`) over an outbound connection, so
+  integrations behind NAT get live push without exposing an endpoint.
+  Automatic reconnect with exponential backoff resumes from the last seen
+  event id; a `StreamReset` marker is yielded when the server cannot replay a
+  gap (re-seed via the status reads). New `StreamEvent` / `StreamReset`
+  models. Optional `events=[...]` server-side filter and
+  `reconnect=False` single-connection mode.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added

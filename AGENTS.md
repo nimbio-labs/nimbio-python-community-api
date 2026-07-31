@@ -33,13 +33,11 @@ client = NimbioClient("nimbio_test_...", base_url="http://localhost:8000")
 
 ## The whole SDK surface (sync — drop the `with`/use `await` for async)
 
-This is every method the SDK exposes. Note the SDK is **community-scoped by
-design**: it covers `/v1/me`, `/healthz`, and the whole `/v1/community/*`
-surface, but deliberately does not wrap the service's Account surface
-(`/v1/account/keys`, `/v1/account/keys/{key_id}/latches/{latch_id}/open`, or the
-hidden `/v1/keys*` / `/v1/calls*` endpoints). That gap is intentional and
-expected to stay (as of 2026-07-16) — call those endpoints over plain HTTPS if
-you need them.
+This is every method the SDK exposes: `/v1/me`, `/healthz`, the whole
+`/v1/community/*` surface (incl. hold opens, webhooks, and the live event
+stream), and the account surface (`client.account.keys()` / `.open()`, added
+0.2.0). Only the service's hidden `/v1/keys*` / `/v1/calls*` endpoints stay
+unwrapped — call those over plain HTTPS if you need them.
 
 ```python
 with NimbioClient("nimbio_test_...") as client:
@@ -69,7 +67,21 @@ with NimbioClient("nimbio_test_...") as client:
     client.community.gate_status_log(page=0)        # -> GateStatusLogPage
     for row in client.community.iter_access_log():  # auto-paginates all pages
         ...
+
+    # Live events (SSE push — same payloads as webhooks, works behind NAT)
+    for ev in client.community.stream_events(
+            events=["sense_line.changed", "hold_open.changed"]):  # filter optional
+        if isinstance(ev, models.StreamReset):
+            ...  # gap not replayable: re-seed via gate_status()/hold_opens()
+        else:
+            ev.id, ev.type, ev.payload   # payload = event-specific fields
 ```
+
+`stream_events()` blocks forever by default (auto-reconnect with backoff,
+resuming from the last seen event id); pass `reconnect=False` to consume one
+connection and return. HTTP errors raise (`RateLimitError` with code
+`stream_limit` = too many concurrent streams; the cap is 3 per key).
+Connecting charges one per-minute request; delivered events are quota-free.
 
 Async is identical with `await`, and the iterators are `async for`:
 
