@@ -801,3 +801,129 @@ class StreamReset:
     """
 
     reason: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
+# Key access schedules
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class ScheduleWindow:
+    """One recurring window during which a key may open its gates.
+
+    ``days_of_the_week`` is a letter string from ``MTWHFSU`` where **H is
+    Thursday**, ``S`` is Saturday and ``U`` is Sunday. ``start_time`` and
+    ``end_time`` are ``'HH:MM'`` in each gate's own local time; both are None
+    for an all-day window.
+
+    A window cannot run past midnight — the server rejects ``end <= start``
+    with ``overnight_not_supported``. Express overnight access as two windows.
+    """
+
+    days_of_the_week: str
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    temporal_date_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "ScheduleWindow":
+        d = _d(raw)
+        return cls(
+            days_of_the_week=d.get("days_of_the_week") or "",
+            start_time=d.get("start_time"),
+            end_time=d.get("end_time"),
+            temporal_date_id=d.get("temporal_date_id"),
+            raw=d,
+        )
+
+    def to_payload(self) -> Dict[str, Any]:
+        """The wire form the API accepts (identifiers are server-assigned and
+        deliberately omitted)."""
+        return {
+            "days_of_the_week": self.days_of_the_week,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+        }
+
+
+@dataclass
+class KeySchedule:
+    """A key's access schedule.
+
+    ``restricted`` means the key is genuinely time-limited.
+    ``permanently_blocked`` means it has windows saved but the restriction is
+    switched off, which denies **every** open at every hour — a fault to
+    repair, not a working schedule. Saving a schedule through this SDK clears
+    that state.
+
+    ``descendant_key_count`` is the blast radius: a schedule on the community
+    key applies to every member key beneath it. Check it before restricting a
+    key where ``is_community_key`` is True.
+    """
+
+    key_id: Optional[str]
+    key_name: Optional[str]
+    restricted: bool
+    permanently_blocked: bool
+    is_temporal_enabled: bool
+    windows: List[ScheduleWindow] = field(default_factory=list)
+    latch_count: int = 0
+    latches: List[Dict[str, Any]] = field(default_factory=list)
+    is_community_key: bool = False
+    descendant_key_count: int = 0
+    result: Optional[str] = None
+    request_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "KeySchedule":
+        d = _d(raw)
+        return cls(
+            key_id=d.get("key_id"),
+            key_name=d.get("key_name"),
+            restricted=bool(d.get("restricted")),
+            permanently_blocked=bool(d.get("permanently_blocked")),
+            is_temporal_enabled=bool(d.get("is_temporal_enabled")),
+            windows=[ScheduleWindow.from_dict(w) for w in (d.get("windows") or [])],
+            latch_count=int(d.get("latch_count") or 0),
+            latches=list(d.get("latches") or []),
+            is_community_key=bool(d.get("is_community_key")),
+            descendant_key_count=int(d.get("descendant_key_count") or 0),
+            result=d.get("result"),
+            request_id=d.get("request_id"),
+            raw=d,
+        )
+
+
+@dataclass
+class KeySchedules:
+    """Every key's access schedule for the community."""
+
+    keys: List[KeySchedule] = field(default_factory=list)
+    request_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __iter__(self):
+        return iter(self.keys)
+
+    def __len__(self) -> int:
+        return len(self.keys)
+
+    @property
+    def blocked(self) -> List[KeySchedule]:
+        """Keys denied at all times because a saved schedule is switched off."""
+        return [k for k in self.keys if k.permanently_blocked]
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "KeySchedules":
+        d = _d(raw)
+        return cls(
+            keys=[KeySchedule.from_dict(k) for k in (d.get("keys") or [])],
+            request_id=d.get("request_id"),
+            raw=d,
+        )

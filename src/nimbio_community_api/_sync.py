@@ -21,6 +21,8 @@ from .models import (
     Health,
     HoldOpenEventAdded,
     HoldOpenEventRemoved,
+    KeySchedule,
+    KeySchedules,
     HoldOpens,
     KeyStatuses,
     ManualHoldOpenResult,
@@ -244,6 +246,39 @@ class _SyncCommunity:
         """Remove a one-time hold-open window early. Idempotent."""
         return self._c._request(
             endpoints.remove_hold_open_event(latch_id, event_id))
+
+    # -- key access schedules ------------------------------------------------ #
+
+    def key_schedules(self) -> KeySchedules:
+        """Access schedules for the community's keys.
+
+        Returns the community's own key(s) plus every member key that currently
+        **has** a schedule. Unrestricted member keys are omitted — a community
+        can hold tens of thousands of them — so use :meth:`key_schedule` to read
+        one by id.
+
+        ``.blocked`` lists keys denied at all times because a saved schedule is
+        switched off. Does not consume the monthly quota."""
+        return self._c._request(endpoints.key_schedules())
+
+    def key_schedule(self, key_id: str) -> KeySchedule:
+        """One key's access schedule. Does not consume the monthly quota."""
+        return self._c._request(endpoints.key_schedule(key_id))
+
+    def set_key_schedule(self, key_id: str, windows) -> KeySchedule:
+        """Replace a key's access schedule.
+
+        ``windows`` is the COMPLETE schedule -- pass ``[]`` to remove every
+        restriction. Accepts :class:`ScheduleWindow` objects or plain dicts of
+        ``{days_of_the_week, start_time, end_time}``.
+
+        Days are letters from ``MTWHFSU`` (**H is Thursday**, U is Sunday).
+        Times are ``'HH:MM'`` in each gate's local time and cannot run past
+        midnight -- send two windows for overnight access.
+
+        A schedule on the community key applies to every member key beneath it;
+        check ``descendant_key_count`` first. Test keys simulate."""
+        return self._c._request(endpoints.set_key_schedule(key_id, windows))
 
     # -- webhooks ------------------------------------------------------------ #
 

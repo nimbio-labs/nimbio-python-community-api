@@ -61,6 +61,13 @@ with NimbioClient("nimbio_test_...") as client:
     client.community.set_keys_disabled(ACCOUNT_COMMUNITY_ID, ["KEY_ID"],
                                        disabled=True)                      # -> WriteResult
 
+    # Access schedules — limit WHEN a key may open its gates
+    client.community.key_schedules()                # -> KeySchedules (.keys, .blocked)
+    client.community.key_schedule("KEY_ID")         # -> KeySchedule
+    client.community.set_key_schedule("KEY_ID", [   # REPLACES the whole schedule
+        models.ScheduleWindow("MTWHF", "06:00", "18:00")])
+    client.community.set_key_schedule("KEY_ID", []) # [] = always allowed
+
     # Logs (community must have Access Log History enabled)
     client.community.member_access_logs(ACCOUNT_COMMUNITY_ID, window="last_30")  # last_30|30_60|60_90
     client.community.access_log(page=0)             # -> AccessLogPage  (.logs, .has_more)
@@ -92,6 +99,21 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
     async for row in client.community.iter_access_log():
         ...
 ```
+
+## Access schedules (read before writing one)
+
+- `days_of_the_week` letters are `MTWHFSU` — **`H` is Thursday**, `S` Saturday,
+  `U` Sunday. Times are `'HH:MM'` in each gate's own local time.
+- `set_key_schedule` **replaces** the whole schedule. Send every window you
+  want to keep. `[]` removes the restriction.
+- A window **cannot run past midnight**: `22:00`–`06:00` raises
+  `BadRequestError` (`overnight_not_supported`). Send two windows.
+- A schedule on the community key cascades to **every** member key beneath it.
+  Check `.is_community_key` and `.descendant_key_count` before writing.
+- A schedule applies to **every** gate the key opens; no per-gate override.
+- `.permanently_blocked` means windows are saved but the restriction is off —
+  the key is denied at all times. That is a fault, not a schedule; saving fixes
+  it. `key_schedules().blocked` lists them.
 
 ## ID vocabulary (important)
 

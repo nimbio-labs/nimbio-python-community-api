@@ -123,6 +123,48 @@ assert client.mode == "test"   # great as a guard before destructive calls
 | `revoke_keys(account_community_id, key_ids, *, remove_member=False)` | `WriteResult` |
 | `set_keys_disabled(account_community_id, key_ids, disabled)` | `WriteResult` |
 
+### `client.community` — access schedules
+
+Limit **when** a key may open its gates.
+
+| Method | Returns |
+|---|---|
+| `key_schedules()` | `KeySchedules` — the community key(s) plus member keys that **have** a schedule; `.blocked` lists keys denied at all times |
+| `key_schedule(key_id)` | `KeySchedule` |
+| `set_key_schedule(key_id, windows)` | `KeySchedule` — replaces the **whole** schedule; `[]` removes the restriction |
+
+```python
+from nimbio_community_api import models
+
+# Weekday daytime access only.
+client.community.set_key_schedule("KEY_ID", [
+    models.ScheduleWindow("MTWHF", "06:00", "18:00"),
+])
+
+# Remove every restriction.
+client.community.set_key_schedule("KEY_ID", [])
+```
+
+`days_of_the_week` is a letter string from `MTWHFSU` — **`H` is Thursday**, `S`
+is Saturday, `U` is Sunday. Times are `'HH:MM'` in each gate's own local time.
+
+Four rules worth knowing before writing one:
+
+- **The write replaces the entire schedule.** Send every window you want to
+  keep; `[]` means "always allowed".
+- **Windows cannot run past midnight.** `22:00`–`06:00` is rejected with
+  `overnight_not_supported` — send two windows instead, one ending `23:59` and
+  one starting `00:00` on the following day.
+- **A schedule on the community key applies to every member key beneath it.**
+  Check `descendant_key_count` and `is_community_key` first.
+- **A schedule covers every gate the key opens** — there is no per-gate
+  override.
+
+`restricted` means the key is genuinely time-limited. `permanently_blocked`
+means windows are saved but the restriction is switched off, which denies every
+open at every hour — a fault rather than a working schedule. Saving a schedule
+repairs it.
+
 ### `client.community` — logs
 
 | Method | Returns |

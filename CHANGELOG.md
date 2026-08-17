@@ -3,6 +3,26 @@
 All notable changes to `nimbio-community-api` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-17
+
+### Added
+- Key access schedules: `client.community.key_schedules()`,
+  `key_schedule(key_id)` and `set_key_schedule(key_id, windows)` (sync and
+  async) — limit which days and times a key may open its gates.
+  `set_key_schedule` replaces the whole schedule; `[]` removes the restriction
+  entirely. New `KeySchedule`, `KeySchedules` and `ScheduleWindow` models;
+  `ScheduleWindow` round-trips, so windows read back from the API can be sent
+  straight back. `key_schedules().blocked` collects keys denied at **all**
+  times because a saved schedule is switched off — the windows in that state
+  block rather than restrict, so it is worth surfacing. Reads are
+  quota-exempt. Mirrors the npm SDK's `keySchedules()` (released together).
+
+  Two server rules the models cannot express, so they are documented instead:
+  a window cannot run past midnight (`22:00`-`06:00` raises
+  `overnight_not_supported` — send two windows), and a schedule on the
+  community key cascades to every member key beneath it (check
+  `descendant_key_count`).
+
 ## [0.3.0] - 2026-07-31
 
 ### Added

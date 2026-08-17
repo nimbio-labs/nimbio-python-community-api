@@ -347,6 +347,28 @@ class endpoints:
                 f"{_enc(event_id)}",
                 None, None, _m.HoldOpenEventRemoved.from_dict)
 
+    # -- key access schedules -------------------------------------------- #
+
+    @staticmethod
+    def key_schedules():
+        return ("GET", "/v1/community/key-schedules", None, None,
+                _m.KeySchedules.from_dict)
+
+    @staticmethod
+    def key_schedule(key_id: str):
+        return ("GET", f"/v1/community/keys/{_enc(key_id)}/schedule",
+                None, None, _m.KeySchedule.from_dict)
+
+    @staticmethod
+    def set_key_schedule(key_id: str, windows):
+        # Whole-schedule replace: [] removes every restriction. Accepts
+        # ScheduleWindow objects or plain dicts so callers can round-trip what
+        # a read returned without converting.
+        payload = [w.to_payload() if hasattr(w, "to_payload") else dict(w)
+                   for w in (windows or [])]
+        return ("PUT", f"/v1/community/keys/{_enc(key_id)}/schedule",
+                None, {"windows": payload}, _m.KeySchedule.from_dict)
+
     # -- webhooks -------------------------------------------------------- #
 
     @staticmethod
