@@ -151,6 +151,19 @@ def test_all_day_window_sends_null_times(client):
 
 
 @respx.mock
+def test_end_of_day_sentinel_passes_through(client):
+    """'24:00' is the gapless way to end at midnight and must not be rewritten."""
+    route = respx.put(f"{PROD}/v1/community/keys/k1/schedule").mock(
+        return_value=httpx.Response(200, json=_SCHEDULE))
+
+    client.community.set_key_schedule("k1", [
+        models.ScheduleWindow("MTWHF", "22:00", "24:00")])
+
+    assert _body(route) == {"windows": [
+        {"days_of_the_week": "MTWHF", "start_time": "22:00", "end_time": "24:00"}]}
+
+
+@respx.mock
 def test_test_mode_write_is_flagged_simulated(client):
     respx.put(f"{PROD}/v1/community/keys/k1/schedule").mock(
         return_value=httpx.Response(200, json={

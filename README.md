@@ -153,8 +153,10 @@ Four rules worth knowing before writing one:
 - **The write replaces the entire schedule.** Send every window you want to
   keep; `[]` means "always allowed".
 - **Windows cannot run past midnight.** `22:00`–`06:00` is rejected with
-  `overnight_not_supported` — send two windows instead, one ending `23:59` and
-  one starting `00:00` on the following day.
+  `overnight_not_supported` — send two windows instead, the first ending
+  `'24:00'` and the second starting `'00:00'` on the following day. Use
+  `'24:00'` (the end-of-day sentinel), not `'23:59'`, or the two halves leave a
+  one-minute gap every night.
 - **A schedule on the community key applies to every member key beneath it.**
   Check `descendant_key_count` and `is_community_key` first.
 - **A schedule covers every gate the key opens** — there is no per-gate

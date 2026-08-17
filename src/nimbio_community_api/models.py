@@ -816,8 +816,12 @@ class ScheduleWindow:
     ``end_time`` are ``'HH:MM'`` in each gate's own local time; both are None
     for an all-day window.
 
-    A window cannot run past midnight — the server rejects ``end <= start``
-    with ``overnight_not_supported``. Express overnight access as two windows.
+    A window cannot run past midnight — the server rejects a reversed window
+    with ``overnight_not_supported``. Express overnight access as two windows,
+    the first ending ``"24:00"`` (the end-of-day sentinel, valid as an end only)
+    and the second starting ``"00:00"`` the next day. Use ``"24:00"`` rather
+    than ``"23:59"``: the comparison is ``now < end``, so ``"23:59"`` would
+    leave a one-minute gap every night exactly where the two halves meet.
     """
 
     days_of_the_week: str

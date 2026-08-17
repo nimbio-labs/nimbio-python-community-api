@@ -107,7 +107,9 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
 - `set_key_schedule` **replaces** the whole schedule. Send every window you
   want to keep. `[]` removes the restriction.
 - A window **cannot run past midnight**: `22:00`–`06:00` raises
-  `BadRequestError` (`overnight_not_supported`). Send two windows.
+  `BadRequestError` (`overnight_not_supported`). Send two windows — first ends
+  `'24:00'` (end-of-day sentinel, end only), second starts `'00:00'` next day.
+  Never end one at `'23:59'`: that drops the last minute of the day.
 - A schedule on the community key cascades to **every** member key beneath it.
   Check `.is_community_key` and `.descendant_key_count` before writing.
 - A schedule applies to **every** gate the key opens; no per-gate override.
