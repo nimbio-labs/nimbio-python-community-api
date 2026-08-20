@@ -348,6 +348,10 @@ class endpoints:
                 None, None, _m.HoldOpenEventRemoved.from_dict)
 
     # -- key access schedules -------------------------------------------- #
+    #
+    # Community keys only. A schedule on the community key is the
+    # community-wide rule and cascades to every member key beneath it; an
+    # individual member's key is refused with not_a_community_key (403).
 
     @staticmethod
     def key_schedules():

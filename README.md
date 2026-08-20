@@ -125,25 +125,35 @@ assert client.mode == "test"   # great as a guard before destructive calls
 
 ### `client.community` — access schedules
 
-Limit **when** a key may open its gates.
+Limit **when** the community's keys may open their gates.
+
+**Community keys only.** A schedule on a community key *is* the community-wide
+rule — it applies to every member key beneath it. An individual member's key
+cannot be read or scheduled here and is refused with `not_a_community_key`
+(403).
 
 | Method | Returns |
 |---|---|
-| `key_schedules()` | `KeySchedules` — the community key(s) plus member keys that **have** a schedule; `.blocked` lists keys denied at all times |
-| `key_schedule(key_id)` | `KeySchedule` |
+| `key_schedules()` | `KeySchedules` — the community's own key(s), with only the windows in force today; `.blocked` lists keys denied at all times |
+| `key_schedule(key_id)` | `KeySchedule` — every window, expired ones included, since a write replaces the whole schedule |
 | `set_key_schedule(key_id, windows)` | `KeySchedule` — replaces the **whole** schedule; `[]` removes the restriction |
 
 ```python
 from nimbio_community_api import models
 
-# Weekday daytime access only.
-client.community.set_key_schedule("KEY_ID", [
+# Weekday daytime access only, for everyone in the community.
+community_key = client.community.key_schedules().keys[0]
+client.community.set_key_schedule(community_key.key_id, [
     models.ScheduleWindow("MTWHF", "06:00", "18:00"),
 ])
 
 # Remove every restriction.
-client.community.set_key_schedule("KEY_ID", [])
+client.community.set_key_schedule(community_key.key_id, [])
 ```
+
+`descendant_key_count` is how many **live** member keys inherit the restriction —
+check it before writing one. `inactive_window_count` (list only) is how many
+windows were filtered out as expired.
 
 `days_of_the_week` is a letter string from `MTWHFSU` — **`H` is Thursday**, `S`
 is Saturday, `U` is Sunday. Times are `'HH:MM'` in each gate's own local time.

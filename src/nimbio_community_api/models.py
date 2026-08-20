@@ -853,7 +853,12 @@ class ScheduleWindow:
 
 @dataclass
 class KeySchedule:
-    """A key's access schedule.
+    """A community key's access schedule.
+
+    Schedules are set on the community's own keys only. That schedule *is* the
+    community-wide rule: it applies to every member key beneath it. An
+    individual member's key cannot be scheduled through this API and is refused
+    with ``not_a_community_key`` (403).
 
     ``restricted`` means the key is genuinely time-limited.
     ``permanently_blocked`` means it has windows saved but the restriction is
@@ -861,9 +866,15 @@ class KeySchedule:
     repair, not a working schedule. Saving a schedule through this SDK clears
     that state.
 
-    ``descendant_key_count`` is the blast radius: a schedule on the community
-    key applies to every member key beneath it. Check it before restricting a
-    key where ``is_community_key`` is True.
+    ``descendant_key_count`` is the blast radius: how many **live** member keys
+    inherit this restriction. Revoked and hidden keys are not counted, since
+    they are refused at the gate whatever the schedule says. Check it before
+    restricting a key.
+
+    ``inactive_window_count`` is how many windows the list endpoint filtered out
+    because their date range no longer covers today; ``windows`` then holds only
+    what is in force. It is 0 on a single-key read, which returns every window
+    — including expired ones — because a write replaces the whole schedule.
     """
 
     key_id: Optional[str]
@@ -876,6 +887,7 @@ class KeySchedule:
     latches: List[Dict[str, Any]] = field(default_factory=list)
     is_community_key: bool = False
     descendant_key_count: int = 0
+    inactive_window_count: int = 0
     result: Optional[str] = None
     request_id: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -898,6 +910,7 @@ class KeySchedule:
             latches=list(d.get("latches") or []),
             is_community_key=bool(d.get("is_community_key")),
             descendant_key_count=int(d.get("descendant_key_count") or 0),
+            inactive_window_count=int(d.get("inactive_window_count") or 0),
             result=d.get("result"),
             request_id=d.get("request_id"),
             raw=d,
@@ -906,7 +919,12 @@ class KeySchedule:
 
 @dataclass
 class KeySchedules:
-    """Every key's access schedule for the community."""
+    """The community's own keys and their access schedules.
+
+    Community keys only — member keys are not listed, and cannot be scheduled.
+    A restriction on a community key cascades to every member beneath it, which
+    is how a community-wide rule is expressed.
+    """
 
     keys: List[KeySchedule] = field(default_factory=list)
     request_id: Optional[str] = None
@@ -920,7 +938,8 @@ class KeySchedules:
 
     @property
     def blocked(self) -> List[KeySchedule]:
-        """Keys denied at all times because a saved schedule is switched off."""
+        """Community keys denied at all times because a saved schedule is
+        switched off. Re-saving the schedule repairs one."""
         return [k for k in self.keys if k.permanently_blocked]
 
     @classmethod

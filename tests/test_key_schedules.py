@@ -24,6 +24,7 @@ _SCHEDULE = {
     "latches": [{"latch_id": "l1", "name": "Main Gate"}],
     "is_community_key": True,
     "descendant_key_count": 42,
+    "inactive_window_count": 0,
     "request_id": "r1",
 }
 
@@ -191,6 +192,41 @@ def test_overnight_window_raises_bad_request(client):
 
 
 # -- sync/async parity -------------------------------------------------------- #
+
+@respx.mock
+def test_inactive_windows_are_surfaced_not_silently_dropped(client):
+    """The list returns only windows in force today. A caller that saw
+    `windows: []` with no other signal would read an expired schedule as "no
+    restriction", so the count has to come through."""
+    expired = {**_SCHEDULE, "windows": [], "restricted": False,
+               "inactive_window_count": 2}
+    respx.get(f"{PROD}/v1/community/key-schedules").mock(
+        return_value=httpx.Response(200, json={"keys": [expired], "request_id": "r1"}))
+
+    row = client.community.key_schedules().keys[0]
+    assert row.windows == []
+    assert row.inactive_window_count == 2
+
+
+@respx.mock
+def test_member_key_is_refused_with_its_own_code(client):
+    """Schedules are community-keys-only. A member's key must come back as
+    not_a_community_key so the caller knows to schedule the community key
+    instead of hunting for an access problem."""
+    from nimbio_community_api import PermissionDeniedError
+
+    respx.put(f"{PROD}/v1/community/keys/member1/schedule").mock(
+        return_value=httpx.Response(403, json={"error": {
+            "code": "not_a_community_key",
+            "message": ("Access schedules are set on the community key, which "
+                        "applies to every member beneath it."),
+            "request_id": "r1"}}))
+
+    with pytest.raises(PermissionDeniedError) as excinfo:
+        client.community.set_key_schedule(
+            "member1", [models.ScheduleWindow("MTWHF", "06:00", "18:00")])
+    assert excinfo.value.code == "not_a_community_key"
+
 
 def test_async_client_exposes_the_same_methods():
     """The two clients must not drift: every schedule method on the sync client

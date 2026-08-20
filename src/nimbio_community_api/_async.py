@@ -225,23 +225,32 @@ class _AsyncCommunity:
     # -- key access schedules ------------------------------------------------ #
 
     async def key_schedules(self) -> KeySchedules:
-        """Access schedules for the community's keys.
+        """Access schedules for the community's own keys.
 
-        Returns the community's own key(s) plus every member key that currently
-        **has** a schedule. Unrestricted member keys are omitted — a community
-        can hold tens of thousands of them — so use :meth:`key_schedule` to read
-        one by id.
+        Community keys only. A schedule on a community key *is* the
+        community-wide rule -- it applies to every member key beneath it -- so
+        member keys are neither listed here nor schedulable: :meth:`key_schedule`
+        and :meth:`set_key_schedule` refuse one with ``not_a_community_key``
+        (403).
+
+        ``windows`` holds only what is in force today; anything whose date range
+        has passed is counted in ``inactive_window_count`` instead.
 
         ``.blocked`` lists keys denied at all times because a saved schedule is
         switched off. Does not consume the monthly quota."""
         return await self._c._request(endpoints.key_schedules())
 
     async def key_schedule(self, key_id: str) -> KeySchedule:
-        """One key's access schedule. Does not consume the monthly quota."""
+        """One community key's access schedule.
+
+        ``key_id`` must be one of the community's own keys; a member's key is
+        refused with ``not_a_community_key`` (403). Returns **every** window,
+        expired ones included, because :meth:`set_key_schedule` replaces the
+        whole schedule. Does not consume the monthly quota."""
         return await self._c._request(endpoints.key_schedule(key_id))
 
     async def set_key_schedule(self, key_id: str, windows) -> KeySchedule:
-        """Replace a key's access schedule.
+        """Replace a community key's access schedule.
 
         ``windows`` is the COMPLETE schedule -- pass ``[]`` to remove every
         restriction. Accepts :class:`ScheduleWindow` objects or plain dicts of
@@ -251,8 +260,10 @@ class _AsyncCommunity:
         Times are ``'HH:MM'`` in each gate's local time and cannot run past
         midnight -- send two windows for overnight access.
 
-        A schedule on the community key applies to every member key beneath it;
-        check ``descendant_key_count`` first. Test keys simulate."""
+        Community keys only: a member's own key cannot be scheduled and is
+        refused with ``not_a_community_key`` (403). The schedule applies to every
+        member key beneath the community key, so check ``descendant_key_count``
+        (live members only) first. Test keys simulate."""
         return await self._c._request(endpoints.set_key_schedule(key_id, windows))
 
     # -- webhooks ------------------------------------------------------------ #
