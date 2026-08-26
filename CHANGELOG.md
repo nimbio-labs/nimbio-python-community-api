@@ -3,6 +3,30 @@
 All notable changes to `nimbio-community-api` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-26
+
+### Changed
+- **Breaking: `key_schedules()`, `key_schedule()` and `set_key_schedule()` are
+  community-keys-only.** A community manager is not permitted to change one
+  member's key schedule. `key_schedules()` now returns the community's own
+  key(s) and nothing else, and passing a member's `key_id` to either
+  single-key method raises `PermissionDeniedError` with
+  `code == "not_a_community_key"`. Nothing you could legitimately do is lost: a
+  schedule on the community key already cascades to every member key beneath
+  it, which is how a community-wide rule is expressed. Tracks the same
+  narrowing in the REST API — see the Public API notes for why this was taken
+  as a break rather than a deprecation.
+- `KeySchedule.descendant_key_count` counts only **live** member keys. It
+  previously included revoked and hidden ones, overstating how many members a
+  restriction actually reaches.
+
+### Added
+- `KeySchedule.inactive_window_count` — how many windows the list endpoint left
+  out because their date range no longer covers today. `key_schedules()`
+  returns only what is in force; `key_schedule(key_id)` still returns every
+  window, expired ones included, because `set_key_schedule()` replaces the
+  whole schedule.
+
 ## [0.4.0] - 2026-08-17
 
 ### Added
