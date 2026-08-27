@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
 from . import _exceptions as exc
+from ._cache import DEFAULT_CACHE_SIZE, CacheStats, ETagCache, cache_key
 from ._environments import resolve_base_url
 from ._version import __version__
 
@@ -26,6 +27,21 @@ DEFAULT_BACKOFF_BASE = 0.5  # seconds; doubles each retry
 ENV_API_KEY = "NIMBIO_API_KEY"
 ENV_ENVIRONMENT = "NIMBIO_ENV"
 ENV_BASE_URL = "NIMBIO_BASE_URL"
+
+
+class _Unset:
+    """Sentinel for a PATCH field whose ``None`` is itself a meaningful value.
+
+    ``update_nfc_tag(latch_id=None)`` detaches a tag from its gate, so "leave
+    it alone" cannot also be spelled ``None``. Callers never pass this — it is
+    only the default that means *omit the field*.
+    """
+
+    def __repr__(self) -> str:
+        return "UNSET"
+
+
+UNSET = _Unset()
 
 
 @dataclass
@@ -49,6 +65,8 @@ class BaseClient:
         timeout: Optional[float] = DEFAULT_TIMEOUT,
         max_retries: int = DEFAULT_MAX_RETRIES,
         default_headers: Optional[Mapping[str, str]] = None,
+        cache: bool = True,
+        cache_size: int = DEFAULT_CACHE_SIZE,
     ) -> None:
         api_key = api_key or os.environ.get(ENV_API_KEY)
         if not api_key:
@@ -70,6 +88,14 @@ class BaseClient:
         self.max_retries = max(0, int(max_retries))
         self._default_headers = dict(default_headers or {})
 
+        # One cache per client, and a client holds exactly one API key for its
+        # whole life — which is how the API's `Vary: Authorization` is honoured
+        # here: there is no path by which one key's stored body is reachable
+        # under another key.
+        self._cache: Optional[ETagCache] = (
+            ETagCache(cache_size) if cache else None
+        )
+
     # -- public, read-only introspection ------------------------------------ #
 
     @property
@@ -84,6 +110,21 @@ class BaseClient:
         if self._api_key.startswith("nimbio_live_"):
             return "live"
         return None
+
+    def cache_stats(self) -> CacheStats:
+        """Hits, misses and stored entries for this client's ETag cache.
+
+        A *hit* is a read the server answered ``304 Not Modified`` — the body
+        came from the cache and the monthly quota was refunded. This is the
+        only way to confirm the saving is actually happening; a client polling
+        an unchanging gate should show hits climbing and misses flat.
+
+        Reports zeroes throughout when the client was built with
+        ``cache=False``. The counters are cumulative for the client's life.
+        """
+        if self._cache is None:
+            return CacheStats(hits=0, misses=0, entries=0)
+        return self._cache.stats()
 
     def __repr__(self) -> str:
         # Deliberately never includes the API key, so it is safe to log.
@@ -127,6 +168,51 @@ class BaseClient:
             params=clean_params or None,
             json=json,
         )
+
+    # -- conditional requests ----------------------------------------------- #
+    #
+    # Three small hooks the sync and async send-loops both call, so the caching
+    # policy lives in one place and only the await differs between them.
+
+    def _cache_begin(self, prepared: PreparedRequest,
+                     path: str) -> Optional[str]:
+        """Attach ``If-None-Match`` if we hold an ETag; return the cache key.
+
+        ``None`` means this request is not cacheable (caching off, not a GET,
+        or an excluded path) and the send-loop should ignore the cache
+        entirely.
+        """
+        if self._cache is None:
+            return None
+        key = cache_key(prepared.method, path, prepared.params)
+        if key is None:
+            return None
+        etag = self._cache.etag_for(key)
+        if etag is not None:
+            prepared.headers["If-None-Match"] = etag
+        return key
+
+    def _cache_hit(self, key: str,
+                   headers: Mapping[str, str]) -> Optional[bytes]:
+        """Record a 304 and return the stored body to re-decode, if any."""
+        if self._cache is None:  # pragma: no cover - key implies a cache
+            return None
+        return self._cache.hit(key, headers.get("etag"))
+
+    def _cache_miss(self, key: str, status_code: int,
+                    headers: Mapping[str, str], body: bytes) -> None:
+        """Record a non-304 response and store it if it carries an ETag."""
+        if self._cache is None:  # pragma: no cover - key implies a cache
+            return
+        self._cache.record_miss()
+        etag = headers.get("etag") if 200 <= status_code < 300 else None
+        if etag and body:
+            self._cache.store(key, etag, body)
+        else:
+            # Either the route stopped offering an ETag or this read failed.
+            # Drop whatever we were holding rather than leave an entry that
+            # will keep asking a question the server no longer answers.
+            self._cache.discard(key)
 
     # -- response handling -------------------------------------------------- #
 
@@ -242,6 +328,10 @@ class endpoints:
                 None, body, _m.OpenResult.from_dict)
 
     @staticmethod
+    def info():
+        return "GET", "/v1/community", None, None, _m.CommunityInfo.from_dict
+
+    @staticmethod
     def gate_status():
         return ("GET", "/v1/community/gate-status", None, None,
                 _m.GateStatus.from_dict)
@@ -249,6 +339,36 @@ class endpoints:
     @staticmethod
     def members():
         return "GET", "/v1/community/members", None, None, _m.Members.from_dict
+
+    @staticmethod
+    def members_page(bucket: str = "accepted", page: int = 1, size: int = 100,
+                     search: Optional[str] = None):
+        return ("GET", "/v1/community/members/page",
+                {"bucket": bucket, "page": page, "size": size, "search": search},
+                None, _m.MembersPage.from_dict)
+
+    @staticmethod
+    def member(account_community_id: int):
+        return ("GET",
+                f"/v1/community/members/{_enc(account_community_id)}",
+                None, None, _m.Member.from_dict)
+
+    @staticmethod
+    def messages(limit: int = 50, offset: int = 0):
+        return ("GET", "/v1/community/messages",
+                {"limit": limit, "offset": offset}, None,
+                _m.MessagesPage.from_dict)
+
+    @staticmethod
+    def update_key(key_id: str, name: Optional[str] = None,
+                   disabled: Optional[bool] = None):
+        body: dict = {}
+        if name is not None:
+            body["name"] = name
+        if disabled is not None:
+            body["disabled"] = disabled
+        return ("PATCH", f"/v1/community/keys/{_enc(key_id)}", None, body,
+                _m.KeyUpdateResult.from_dict)
 
     @staticmethod
     def key_statuses():
@@ -306,6 +426,46 @@ class endpoints:
                 _m.WriteResult.from_dict)
 
     @staticmethod
+    def approve_member(account_community_id: int, key_ids: Any,
+                       move_out_date: Optional[str] = None,
+                       dry_run: Optional[bool] = None):
+        body: dict = {"key_ids": list(key_ids)}
+        if move_out_date is not None:
+            body["move_out_date"] = move_out_date
+        if dry_run is not None:
+            body["dry_run"] = dry_run
+        return ("POST",
+                f"/v1/community/members/{_enc(account_community_id)}/approve",
+                None, body, _m.WriteResult.from_dict)
+
+    # -- bulk member writes ---------------------------------------------- #
+    #
+    # One request, many members. Every one answers 207 with a per-item verdict
+    # (see models.BulkResult): the batch was processed, but individual items
+    # may still have failed.
+
+    @staticmethod
+    def bulk_add_members(items: Any):
+        return ("POST", "/v1/community/members/bulk-add", None,
+                {"items": [dict(i) for i in items]}, _m.BulkResult.from_dict)
+
+    @staticmethod
+    def bulk_grant_keys(items: Any):
+        return ("POST", "/v1/community/members/keys/bulk-grant", None,
+                {"items": [dict(i) for i in items]}, _m.BulkResult.from_dict)
+
+    @staticmethod
+    def bulk_revoke_keys(items: Any):
+        return ("POST", "/v1/community/members/keys/bulk-revoke", None,
+                {"items": [dict(i) for i in items]}, _m.BulkResult.from_dict)
+
+    @staticmethod
+    def bulk_set_keys_disabled(items: Any, disabled: bool):
+        return ("POST", "/v1/community/members/keys/bulk-disabled", None,
+                {"items": [dict(i) for i in items], "disabled": bool(disabled)},
+                _m.BulkResult.from_dict)
+
+    @staticmethod
     def member_access_logs(account_community_id: int, window: str = "last_30"):
         return ("GET",
                 f"/v1/community/members/{_enc(account_community_id)}/access-logs",
@@ -346,6 +506,61 @@ class endpoints:
                 f"/v1/community/latches/{_enc(latch_id)}/hold-open/events/"
                 f"{_enc(event_id)}",
                 None, None, _m.HoldOpenEventRemoved.from_dict)
+
+    @staticmethod
+    def set_hold_open_disabled_until(latch_id: str, until: Optional[str]):
+        # `until` is always sent, null included: an absent field is a 400
+        # rather than an accidental resume.
+        return ("PUT",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/"
+                "disabled-until",
+                None, {"until": until}, _m.HoldOpenDisabledUntil.from_dict)
+
+    @staticmethod
+    def add_hold_open_recurring(latch_id: str, days_of_the_week: str,
+                                start_time: Optional[str] = None,
+                                end_time: Optional[str] = None,
+                                recurring_week: Optional[int] = None):
+        body: dict = {"days_of_the_week": days_of_the_week}
+        if start_time is not None:
+            body["start_time"] = start_time
+        if end_time is not None:
+            body["end_time"] = end_time
+        if recurring_week is not None:
+            body["recurring_week"] = recurring_week
+        return ("POST",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/recurring",
+                None, body, _m.RecurringHoldOpen.from_dict)
+
+    @staticmethod
+    def update_hold_open_recurring(latch_id: str, temporal_date_id: str,
+                                   days_of_the_week: Optional[str] = None,
+                                   start_time: Optional[str] = None,
+                                   end_time: Optional[str] = None,
+                                   recurring_week: Optional[int] = None,
+                                   clear_times: Optional[bool] = None):
+        body: dict = {}
+        if days_of_the_week is not None:
+            body["days_of_the_week"] = days_of_the_week
+        if start_time is not None:
+            body["start_time"] = start_time
+        if end_time is not None:
+            body["end_time"] = end_time
+        if recurring_week is not None:
+            body["recurring_week"] = recurring_week
+        if clear_times is not None:
+            body["clear_times"] = clear_times
+        return ("PATCH",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/recurring/"
+                f"{_enc(temporal_date_id)}",
+                None, body, _m.RecurringHoldOpen.from_dict)
+
+    @staticmethod
+    def remove_hold_open_recurring(latch_id: str, temporal_date_id: str):
+        return ("DELETE",
+                f"/v1/community/latches/{_enc(latch_id)}/hold-open/recurring/"
+                f"{_enc(temporal_date_id)}",
+                None, None, _m.RecurringHoldOpenRemoved.from_dict)
 
     # -- key access schedules -------------------------------------------- #
     #
@@ -425,3 +640,468 @@ class endpoints:
     def test_webhook(webhook_id: str):
         return ("POST", f"/v1/community/webhooks/{_enc(webhook_id)}/test",
                 None, None, _m.WriteResult.from_dict)
+
+    @staticmethod
+    def webhook_deliveries(webhook_id: str, limit: int = 50):
+        return ("GET",
+                f"/v1/community/webhooks/{_enc(webhook_id)}/deliveries",
+                {"limit": limit}, None,
+                lambda d: [_m.WebhookDelivery.from_dict(x)
+                           for x in ((d or {}).get("deliveries") or [])])
+
+    @staticmethod
+    def retry_failed_deliveries(webhook_id: str, since: Optional[str] = None,
+                                limit: int = 50):
+        return ("POST",
+                f"/v1/community/webhooks/{_enc(webhook_id)}/deliveries/"
+                "retry-failed",
+                {"since": since, "limit": limit}, None,
+                _m.DeliveryReplayBatch.from_dict)
+
+    @staticmethod
+    def replay_delivery(webhook_id: str, delivery_id: str):
+        return ("POST",
+                f"/v1/community/webhooks/{_enc(webhook_id)}/deliveries/"
+                f"{_enc(delivery_id)}/replay",
+                None, None, _m.DeliveryReplay.from_dict)
+
+    # -- community settings ---------------------------------------------- #
+    #
+    # `settings` is the settable surface; `read_only` is what Nimbio
+    # provisions and reports for feature discovery. The PATCH is validated
+    # whole before anything is written, so a bad key applies nothing.
+
+    @staticmethod
+    def settings():
+        return ("GET", "/v1/community/settings", None, None,
+                _m.CommunitySettings.from_dict)
+
+    @staticmethod
+    def update_settings(settings: Any):
+        return ("PATCH", "/v1/community/settings", None,
+                {"settings": dict(settings)}, _m.CommunitySettings.from_dict)
+
+    # -- homes / units roster --------------------------------------------- #
+
+    @staticmethod
+    def homes(include_hidden: bool = True):
+        # Always sent explicitly: the server's default is true, and false is a
+        # meaningful choice rather than the absence of one.
+        return ("GET", "/v1/community/homes",
+                {"include_hidden": "true" if include_hidden else "false"},
+                None,
+                lambda d: [_m.Home.from_dict(h)
+                           for h in ((d or {}).get("homes") or [])])
+
+    @staticmethod
+    def add_home(home_address: str):
+        return ("POST", "/v1/community/homes", None,
+                {"home_address": home_address}, _m.Home.from_dict)
+
+    @staticmethod
+    def home(home_id: str):
+        return ("GET", f"/v1/community/homes/{_enc(home_id)}", None, None,
+                _m.Home.from_dict)
+
+    @staticmethod
+    def update_home(home_id: str, home_address: Optional[str] = None,
+                    owner_occupied: Optional[bool] = None,
+                    hidden: Optional[bool] = None):
+        body: dict = {}
+        if home_address is not None:
+            body["home_address"] = home_address
+        if owner_occupied is not None:
+            body["owner_occupied"] = owner_occupied
+        if hidden is not None:
+            body["hidden"] = hidden
+        return ("PATCH", f"/v1/community/homes/{_enc(home_id)}", None, body,
+                _m.Home.from_dict)
+
+    @staticmethod
+    def remove_home(home_id: str):
+        return ("DELETE", f"/v1/community/homes/{_enc(home_id)}", None, None,
+                _m.HomeRemoved.from_dict)
+
+    @staticmethod
+    def set_move_out_date(account_community_id: int,
+                          move_out_date: Optional[str]):
+        # `move_out_date` is always sent, null included: an absent field is a
+        # 422 rather than an accidental no-op.
+        return ("PUT",
+                f"/v1/community/members/{_enc(account_community_id)}/"
+                "move-out-date",
+                None, {"move_out_date": move_out_date},
+                _m.MoveOutDate.from_dict)
+
+    # -- my member-open notification settings ----------------------------- #
+    #
+    # Scoped to the community MANAGER who owns the key, not to the community:
+    # two keys owned by two managers of one community read and write two
+    # different objects through these same four paths. All four return the
+    # complete settings object.
+
+    @staticmethod
+    def my_notification_settings():
+        return ("GET", "/v1/community/my-notification-settings", None, None,
+                _m.NotificationSettings.from_dict)
+
+    @staticmethod
+    def set_my_notifications_enabled(enabled: bool):
+        return ("PUT", "/v1/community/my-notification-settings", None,
+                {"enabled": bool(enabled)}, _m.NotificationSettings.from_dict)
+
+    @staticmethod
+    def add_quiet_hours(days_of_the_week: str,
+                        start_time: Optional[str] = None,
+                        end_time: Optional[str] = None):
+        # Both times omitted is how an all-day window is expressed; sending
+        # explicit nulls would mean the same thing, but the server documents
+        # omission, so keep the body minimal.
+        body: dict = {"days_of_the_week": days_of_the_week}
+        if start_time is not None:
+            body["start_time"] = start_time
+        if end_time is not None:
+            body["end_time"] = end_time
+        return ("POST", "/v1/community/my-notification-settings/quiet-hours",
+                None, body, _m.NotificationSettings.from_dict)
+
+    @staticmethod
+    def remove_quiet_hours(quiet_hours_id: Any):
+        return ("DELETE",
+                "/v1/community/my-notification-settings/quiet-hours/"
+                f"{_enc(quiet_hours_id)}",
+                None, None, _m.NotificationSettings.from_dict)
+
+    # -- guest links ------------------------------------------------------ #
+    #
+    # The responses here carry `token` and `url` — a working gate for anyone
+    # holding them, from the LIST read as well as from create. Nothing in this
+    # file logs a response body, and the models keep both out of their reprs.
+
+    @staticmethod
+    def guest_links(include_inactive: bool = True):
+        # Always sent explicitly: the server's default is true, and false is a
+        # meaningful choice rather than the absence of one.
+        return ("GET", "/v1/community/guest-links",
+                {"include_inactive": "true" if include_inactive else "false"},
+                None,
+                lambda d: [_m.GuestLink.from_dict(x)
+                           for x in ((d or {}).get("guest_links") or [])])
+
+    @staticmethod
+    def create_guest_link(link_type: str, latch_ids: Any,
+                          key_id: Optional[str] = None,
+                          title: Optional[str] = None,
+                          subtitle: Optional[str] = None,
+                          extra_info: Optional[str] = None,
+                          max_uses: Optional[int] = None,
+                          expires_at: Optional[str] = None,
+                          window_start: Optional[str] = None,
+                          window_end: Optional[str] = None,
+                          notify_on_use: Optional[bool] = None):
+        body: dict = {"link_type": link_type, "latch_ids": list(latch_ids)}
+        if key_id is not None:
+            body["key_id"] = key_id
+        if title is not None:
+            body["title"] = title
+        if subtitle is not None:
+            body["subtitle"] = subtitle
+        if extra_info is not None:
+            body["extra_info"] = extra_info
+        if max_uses is not None:
+            body["max_uses"] = int(max_uses)
+        if expires_at is not None:
+            body["expires_at"] = expires_at
+        if window_start is not None:
+            body["window_start"] = window_start
+        if window_end is not None:
+            body["window_end"] = window_end
+        if notify_on_use is not None:
+            body["notify_on_use"] = bool(notify_on_use)
+        return ("POST", "/v1/community/guest-links", None, body,
+                _m.GuestLink.from_dict)
+
+    @staticmethod
+    def revoke_guest_link(guest_link_id: Any):
+        return ("DELETE", f"/v1/community/guest-links/{_enc(guest_link_id)}",
+                None, None, _m.GuestLink.from_dict)
+
+    @staticmethod
+    def guest_link_logs(guest_link_id: Optional[Any] = None, limit: int = 50,
+                        offset: int = 0):
+        return ("GET", "/v1/community/guest-links/logs",
+                {"guest_link_id": guest_link_id, "limit": limit,
+                 "offset": offset},
+                None, _m.GuestLinkLogPage.from_dict)
+
+    @staticmethod
+    def guest_link_latch_exclusions():
+        return ("GET", "/v1/community/guest-links/latch-exclusions", None, None,
+                _m.GuestLinkLatchExclusions.from_dict)
+
+    # -- directory access codes ------------------------------------------- #
+
+    @staticmethod
+    def access_codes():
+        return ("GET", "/v1/community/access-codes", None, None,
+                _m.AccessCodes.from_dict)
+
+    @staticmethod
+    def create_access_code(code: str, latch_ids: Any,
+                           expires_in_hours: Optional[int] = None,
+                           expires_in_days: Optional[int] = None,
+                           temporal: Any = None):
+        body: dict = {"code": code, "latch_ids": list(latch_ids)}
+        if expires_in_hours is not None:
+            body["expires_in_hours"] = int(expires_in_hours)
+        if expires_in_days is not None:
+            body["expires_in_days"] = int(expires_in_days)
+        if temporal is not None:
+            body["temporal"] = dict(temporal)
+        return ("POST", "/v1/community/access-codes", None, body,
+                _m.AccessCodeCreated.from_dict)
+
+    @staticmethod
+    def update_access_code(directory_access_code_id: Any,
+                           disabled: Optional[bool] = None,
+                           latch_ids: Any = None,
+                           expires_in_hours: Optional[int] = None,
+                           expires_in_days: Optional[int] = None,
+                           temporal: Any = None):
+        body: dict = {}
+        if disabled is not None:
+            body["disabled"] = bool(disabled)
+        if latch_ids is not None:
+            body["latch_ids"] = list(latch_ids)
+        if expires_in_hours is not None:
+            body["expires_in_hours"] = int(expires_in_hours)
+        if expires_in_days is not None:
+            body["expires_in_days"] = int(expires_in_days)
+        if temporal is not None:
+            body["temporal"] = dict(temporal)
+        return ("PATCH",
+                f"/v1/community/access-codes/{_enc(directory_access_code_id)}",
+                None, body, _m.AccessCode.from_dict)
+
+    @staticmethod
+    def delete_access_code(directory_access_code_id: Any):
+        return ("DELETE",
+                f"/v1/community/access-codes/{_enc(directory_access_code_id)}",
+                None, None, _m.AccessCodeDeleted.from_dict)
+
+    @staticmethod
+    def access_code_eligible_latches():
+        return ("GET", "/v1/community/access-codes/eligible-latches", None,
+                None, _m.AccessCodeEligibleLatches.from_dict)
+
+    @staticmethod
+    def access_code_logs(limit: int = 50, offset: int = 0):
+        return ("GET", "/v1/community/access-codes/logs",
+                {"limit": limit, "offset": offset}, None,
+                _m.AccessCodeLogPage.from_dict)
+
+    # -- GuestView Entry --------------------------------------------------- #
+    #
+    # Every one of these five returns the complete settings object, so the
+    # writes never need a follow-up read.
+
+    @staticmethod
+    def guest_view_entry():
+        return ("GET", "/v1/community/guest-view-entry", None, None,
+                _m.GuestViewEntry.from_dict)
+
+    @staticmethod
+    def set_guest_view_entry_enabled(allowed: bool):
+        # An explicit setter rather than a toggle: this call is retryable, and
+        # a retried toggle would flip guest access back open.
+        return ("PUT", "/v1/community/guest-view-entry", None,
+                {"allowed": bool(allowed)}, _m.GuestViewEntry.from_dict)
+
+    @staticmethod
+    def set_guest_view_entry_latches(latch_ids: Any):
+        # Whole-set replace, hence the PUT: an omitted latch loses guest
+        # eligibility AND its schedule windows are deleted with it.
+        return ("PUT", "/v1/community/guest-view-entry/eligible-latches", None,
+                {"latch_ids": list(latch_ids)}, _m.GuestViewEntry.from_dict)
+
+    @staticmethod
+    def guest_view_entry_logs(limit: int = 50, offset: int = 0,
+                              success: Optional[bool] = None):
+        return ("GET", "/v1/community/guest-view-entry/logs",
+                {"limit": limit, "offset": offset,
+                 "success": None if success is None
+                 else ("true" if success else "false")},
+                None, _m.GuestViewEntryLogPage.from_dict)
+
+    @staticmethod
+    def add_guest_view_entry_schedule(latch_ids: Any, days_of_the_week: str,
+                                      start_time: Optional[str] = None,
+                                      end_time: Optional[str] = None):
+        body: dict = {"latch_ids": list(latch_ids),
+                      "days_of_the_week": days_of_the_week}
+        if start_time is not None:
+            body["start_time"] = start_time
+        if end_time is not None:
+            body["end_time"] = end_time
+        return ("POST", "/v1/community/guest-view-entry/schedule", None, body,
+                _m.GuestViewEntry.from_dict)
+
+    @staticmethod
+    def remove_guest_view_entry_schedule(schedule_id: Any):
+        return ("DELETE",
+                f"/v1/community/guest-view-entry/schedule/{_enc(schedule_id)}",
+                None, None, _m.GuestViewEntry.from_dict)
+
+    # -- GuestView short codes --------------------------------------------- #
+
+    @staticmethod
+    def short_codes():
+        return ("GET", "/v1/community/short-codes", None, None,
+                lambda d: [_m.ShortCode.from_dict(x)
+                           for x in ((d or {}).get("short_codes") or [])])
+
+    @staticmethod
+    def create_short_code(code: Optional[str] = None,
+                          latch_id: Optional[str] = None):
+        body: dict = {}
+        if code is not None:
+            body["code"] = code
+        if latch_id is not None:
+            body["latch_id"] = latch_id
+        return ("POST", "/v1/community/short-codes", None, body,
+                _m.ShortCode.from_dict)
+
+    @staticmethod
+    def assign_short_code(code: str, latch_id: str):
+        # Exclusive: the code routes to exactly one gate, so this detaches
+        # whatever it pointed at before.
+        return ("PUT", f"/v1/community/short-codes/{_enc(code)}", None,
+                {"latch_id": latch_id}, _m.ShortCode.from_dict)
+
+    # -- NFC tags ---------------------------------------------------------- #
+    #
+    # One PATCH does assign, unassign and disable. `disabled` is applied
+    # before `latch_id`, and a write that would leave a Scan Only gate with no
+    # working tag answers 409 `requires_confirmation` — a warning, retryable
+    # with confirm=True, not a veto.
+
+    @staticmethod
+    def nfc_tags(search: Optional[str] = None, page: int = 1,
+                 results_per_page: int = 50):
+        return ("GET", "/v1/community/nfc-tags",
+                {"search": search, "page": page,
+                 "results_per_page": results_per_page},
+                None, _m.NfcTagPage.from_dict)
+
+    @staticmethod
+    def nfc_tag(tag_id: Any):
+        return ("GET", f"/v1/community/nfc-tags/{_enc(tag_id)}", None, None,
+                _m.NfcTag.from_dict)
+
+    @staticmethod
+    def update_nfc_tag(tag_id: Any, disabled: Optional[bool] = None,
+                       latch_id: Any = UNSET, confirm: Optional[bool] = None):
+        # `latch_id=None` is a real instruction (detach), so the "leave it
+        # alone" default has to be something else — hence the sentinel.
+        body: dict = {}
+        if disabled is not None:
+            body["disabled"] = bool(disabled)
+        if latch_id is not UNSET:
+            body["latch_id"] = latch_id
+        if confirm is not None:
+            body["confirm"] = bool(confirm)
+        return ("PATCH", f"/v1/community/nfc-tags/{_enc(tag_id)}", None, body,
+                _m.NfcTag.from_dict)
+
+    @staticmethod
+    def nfc_scan_log(limit: int = 50, offset: int = 0,
+                     result: Optional[str] = None,
+                     tag_uid_hex: Optional[str] = None):
+        return ("GET", "/v1/community/nfc-tags/scan-log",
+                {"limit": limit, "offset": offset, "result": result,
+                 "tag_uid_hex": tag_uid_hex},
+                None, _m.NfcScanLogPage.from_dict)
+
+    # -- sense lines ------------------------------------------------------- #
+    #
+    # A sense line id is an input number on a board, unique only within its
+    # box, so addressing ONE of them needs `box_id` as well: it is a required
+    # argument on `sense_line` and `update_sense_line` (the OpenAPI schema
+    # marks it optional because the handler validates it, but omitting it is a
+    # 422 `box_id_required`), and a genuine filter on the two list reads.
+
+    @staticmethod
+    def sense_lines(box_id: Optional[str] = None):
+        return ("GET", "/v1/community/sense-lines", {"box_id": box_id}, None,
+                _m.SenseLines.from_dict)
+
+    @staticmethod
+    def sense_line(sense_line_id: int, box_id: str):
+        return ("GET", f"/v1/community/sense-lines/{_enc(sense_line_id)}",
+                {"box_id": box_id}, None, _m.SenseLine.from_dict)
+
+    @staticmethod
+    def update_sense_line(sense_line_id: int, box_id: str,
+                          sense_line_online: Optional[bool] = None,
+                          latch_data_online: Optional[bool] = None):
+        body: dict = {}
+        if sense_line_online is not None:
+            body["sense_line_online"] = bool(sense_line_online)
+        if latch_data_online is not None:
+            body["latch_data_online"] = bool(latch_data_online)
+        return ("PATCH", f"/v1/community/sense-lines/{_enc(sense_line_id)}",
+                {"box_id": box_id}, body, _m.SenseLine.from_dict)
+
+    @staticmethod
+    def sense_line_records(box_id: Optional[str] = None,
+                           sense_line_id: Optional[int] = None,
+                           limit: int = 50, offset: int = 0):
+        return ("GET", "/v1/community/sense-lines/records",
+                {"box_id": box_id, "sense_line_id": sense_line_id,
+                 "limit": limit, "offset": offset},
+                None, _m.SenseLineRecordPage.from_dict)
+
+    # -- map and geofences -------------------------------------------------- #
+
+    @staticmethod
+    def map():
+        return ("GET", "/v1/community/map", None, None,
+                _m.CommunityMap.from_dict)
+
+    @staticmethod
+    def update_geofence(latch_id: str, enabled: Optional[bool] = None,
+                        latitude: Optional[float] = None,
+                        longitude: Optional[float] = None,
+                        radius_meters: Optional[int] = None,
+                        mode: Optional[str] = None):
+        # Partial update: an omitted field keeps its stored value, which is
+        # also why there is no way to clear a configured centre here.
+        body: dict = {}
+        if enabled is not None:
+            body["enabled"] = bool(enabled)
+        if latitude is not None:
+            body["latitude"] = float(latitude)
+        if longitude is not None:
+            body["longitude"] = float(longitude)
+        if radius_meters is not None:
+            body["radius_meters"] = int(radius_meters)
+        if mode is not None:
+            body["mode"] = mode
+        return ("PATCH", f"/v1/community/latches/{_enc(latch_id)}/geofence",
+                None, body, _m.MapLatch.from_dict)
+
+    # -- audit trails ------------------------------------------------------- #
+
+    @staticmethod
+    def change_logs(log_type: str, days: int = 30, limit: int = 500,
+                    offset: int = 0):
+        return ("GET", "/v1/community/change-logs",
+                {"type": log_type, "days": days, "limit": limit,
+                 "offset": offset},
+                None, _m.ChangeLogPage.from_dict)
+
+    @staticmethod
+    def key_usage(date_from: str, date_to: str, page: int = 0):
+        return ("GET", "/v1/community/key-usage",
+                {"from": date_from, "to": date_to, "page": page}, None,
+                _m.KeyUsageReport.from_dict)

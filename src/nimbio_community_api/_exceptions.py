@@ -95,6 +95,25 @@ class NotFoundError(APIError):
     """404 — the addressed resource does not exist."""
 
 
+class ConflictError(APIError):
+    """409 — the request collided with the current state of the resource.
+
+    Usually **recoverable**: the API spends 409 on conditions the caller is
+    meant to catch and act on, not as a generic failure. Read ``.code``:
+
+    - ``delivery_in_flight`` — a webhook replay was refused because Nimbio is
+      still retrying that delivery itself. Let its backoff finish; replaying
+      now would double-fire the event.
+    - ``webhook_disabled`` — the webhook is inactive or was auto-disabled after
+      repeated failures. Re-enable it yourself with
+      ``update_webhook(webhook_id, active=True)``, then retry.
+    - ``requires_confirmation`` — a warning, not a veto. The same call succeeds
+      when repeated with ``"confirm": true``.
+    - ``already_accepted`` — from :meth:`community.approve_member`: that member
+      is already an accepted member, so there is nothing to approve.
+    """
+
+
 class RateLimitError(APIError):
     """429 — per-minute or monthly quota exceeded.
 
@@ -132,6 +151,8 @@ def exception_for(status_code: int, code: Optional[str]) -> type[APIError]:
         return PermissionDeniedError
     if status_code == 404:
         return NotFoundError
+    if status_code == 409:
+        return ConflictError
     if status_code == 429:
         return RateLimitError
     if status_code in (502, 503):

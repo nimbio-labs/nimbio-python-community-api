@@ -11,6 +11,10 @@ from nimbio_community_api import _exceptions as e
     (403, "open_denied", e.PermissionDeniedError),
     (403, "not_community_key", e.PermissionDeniedError),
     (404, "member_not_found", e.NotFoundError),
+    (409, "delivery_in_flight", e.ConflictError),
+    (409, "webhook_disabled", e.ConflictError),
+    (409, "requires_confirmation", e.ConflictError),
+    (409, None, e.ConflictError),
     (429, "rate_limited", e.RateLimitError),
     (504, "did_not_open", e.GateNotOpenedError),
     (502, "upstream_unavailable", e.UpstreamError),
@@ -72,3 +76,13 @@ def test_connection_and_timeout_errors():
 
 def test_config_error_is_nimbio_error():
     assert issubclass(e.NimbioConfigError, e.NimbioError)
+
+
+def test_conflict_is_catchable_as_an_api_error():
+    """409 is actionable rather than fatal, but code that only catches APIError
+    must still see it."""
+    err = e.ConflictError("still retrying", status_code=409,
+                          code="delivery_in_flight", request_id="r1")
+    assert isinstance(err, e.APIError)
+    assert isinstance(err, e.NimbioError)
+    assert err.code == "delivery_in_flight"

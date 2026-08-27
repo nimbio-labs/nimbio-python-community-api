@@ -31,6 +31,7 @@ Two clients share one transport-agnostic core:
 - `_base.py` — `BaseClient` (config resolution, headers, request prep, response decode/parse, error mapping, retry policy) and the `endpoints` registry, the **single source of truth** for the HTTP surface. Each endpoint returns `(method, path, params, json, parser)`.
 - `_sync.py` — `NimbioClient` + `_SyncCommunity` (blocking, `httpx.Client`).
 - `_async.py` — `AsyncNimbioClient` + `_AsyncCommunity` (asyncio, `httpx.AsyncClient`).
+- `_cache.py` — the bounded LRU ETag store behind transparent conditional GETs (`If-None-Match` → 304 → replay). Opportunistic: it caches whatever carries an `ETag` and hardcodes no route list. Never honours `max-age`, so it can never serve stale data and needs no write-invalidation. `BaseClient` owns one instance per client (which is how `Vary: Authorization` is satisfied); `cache=False` opts out.
 - `models.py` — tolerant dataclass response models; every one keeps the full payload on `.raw`.
 - `_exceptions.py` — `NimbioError` hierarchy mapping the `{error:{code,message,request_id}}` envelope.
 - `_environments.py` — `prod`/`dev`/`local` → base URL.

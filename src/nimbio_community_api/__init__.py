@@ -31,8 +31,9 @@ real (live) or simulated (test) action is determined by the API key itself.
 
 from __future__ import annotations
 
-from . import models, webhooks
+from . import constants, models, webhooks
 from ._async import AsyncNimbioClient
+from ._cache import DEFAULT_CACHE_SIZE, CacheStats
 from ._environments import DEFAULT_ENVIRONMENT, ENVIRONMENTS
 from ._exceptions import (
     APIConnectionError,
@@ -40,6 +41,7 @@ from ._exceptions import (
     APITimeoutError,
     AuthenticationError,
     BadRequestError,
+    ConflictError,
     GateNotOpenedError,
     NimbioConfigError,
     NimbioError,
@@ -51,6 +53,16 @@ from ._exceptions import (
 )
 from ._sync import NimbioClient
 from ._version import __version__
+from .constants import (
+    CAPABILITIES,
+    CHANGE_LOG_TYPES,
+    GEOFENCE_MODES,
+    GUEST_LINK_STATES,
+    GUEST_LINK_TYPES,
+    KEY_USAGE_REPORT_TYPES,
+    STREAM_EVENT_TYPES,
+    has_capability,
+)
 
 __all__ = [
     "__version__",
@@ -60,8 +72,21 @@ __all__ = [
     # environments
     "ENVIRONMENTS",
     "DEFAULT_ENVIRONMENT",
+    # conditional-request cache (on by default; see NimbioClient(cache=...))
+    "CacheStats",
+    "DEFAULT_CACHE_SIZE",
     # models module (typed response objects)
     "models",
+    # known server vocabularies (open sets — never used to reject a value)
+    "constants",
+    "CAPABILITIES",
+    "STREAM_EVENT_TYPES",
+    "GUEST_LINK_TYPES",
+    "GUEST_LINK_STATES",
+    "GEOFENCE_MODES",
+    "CHANGE_LOG_TYPES",
+    "KEY_USAGE_REPORT_TYPES",
+    "has_capability",
     # webhook delivery verification (HMAC)
     "webhooks",
     # exceptions
@@ -74,6 +99,7 @@ __all__ = [
     "AuthenticationError",
     "PermissionDeniedError",
     "NotFoundError",
+    "ConflictError",
     "RateLimitError",
     "GateNotOpenedError",
     "UpstreamError",

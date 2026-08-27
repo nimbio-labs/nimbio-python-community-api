@@ -1,0 +1,472 @@
+{
+  "sdk": "python",
+  "package": "nimbio-community-api",
+  "version": "0.6.0",
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/healthz",
+      "builder": "health"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/account/keys",
+      "builder": "account_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/account/keys/{key_id}/latches/{latch_id}/open",
+      "builder": "account_open"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community",
+      "builder": "info"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/access-codes",
+      "builder": "access_codes"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/access-codes",
+      "builder": "create_access_code"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/access-codes/eligible-latches",
+      "builder": "access_code_eligible_latches"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/access-codes/logs",
+      "builder": "access_code_logs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/access-codes/{directory_access_code_id}",
+      "builder": "delete_access_code"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/access-codes/{directory_access_code_id}",
+      "builder": "update_access_code"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/access-logs",
+      "builder": "access_log"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/change-logs",
+      "builder": "change_logs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/gate-status",
+      "builder": "gate_status"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/gate-status-log",
+      "builder": "gate_status_log"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/guest-links",
+      "builder": "guest_links"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/guest-links",
+      "builder": "create_guest_link"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/guest-links/latch-exclusions",
+      "builder": "guest_link_latch_exclusions"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/guest-links/logs",
+      "builder": "guest_link_logs"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/guest-links/{guest_link_id}",
+      "builder": "revoke_guest_link"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/guest-view-entry",
+      "builder": "guest_view_entry"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/guest-view-entry",
+      "builder": "set_guest_view_entry_enabled"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/guest-view-entry/eligible-latches",
+      "builder": "set_guest_view_entry_latches"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/guest-view-entry/logs",
+      "builder": "guest_view_entry_logs"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/guest-view-entry/schedule",
+      "builder": "add_guest_view_entry_schedule"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/guest-view-entry/schedule/{schedule_id}",
+      "builder": "remove_guest_view_entry_schedule"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/hold-opens",
+      "builder": "hold_opens"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/homes",
+      "builder": "homes"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/homes",
+      "builder": "add_home"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/homes/{home_id}",
+      "builder": "remove_home"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/homes/{home_id}",
+      "builder": "home"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/homes/{home_id}",
+      "builder": "update_home"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/key-schedules",
+      "builder": "key_schedules"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/key-statuses",
+      "builder": "key_statuses"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/key-usage",
+      "builder": "key_usage"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/keys",
+      "builder": "keys"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/keys/{key_id}",
+      "builder": "update_key"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/keys/{key_id}/schedule",
+      "builder": "key_schedule"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/keys/{key_id}/schedule",
+      "builder": "set_key_schedule"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/latches/{latch_id}/geofence",
+      "builder": "update_geofence"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/latches/{latch_id}/hold-open",
+      "builder": "set_hold_open"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/latches/{latch_id}/hold-open/disabled-until",
+      "builder": "set_hold_open_disabled_until"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/latches/{latch_id}/hold-open/events",
+      "builder": "add_hold_open_event"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/latches/{latch_id}/hold-open/events/{event_id}",
+      "builder": "remove_hold_open_event"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/latches/{latch_id}/hold-open/recurring",
+      "builder": "add_hold_open_recurring"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/latches/{latch_id}/hold-open/recurring/{temporal_date_id}",
+      "builder": "remove_hold_open_recurring"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/latches/{latch_id}/hold-open/recurring/{temporal_date_id}",
+      "builder": "update_hold_open_recurring"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/latches/{latch_id}/open",
+      "builder": "open"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/map",
+      "builder": "map"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/members",
+      "builder": "members"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members",
+      "builder": "add_member"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/bulk-add",
+      "builder": "bulk_add_members"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/keys/bulk-disabled",
+      "builder": "bulk_set_keys_disabled"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/keys/bulk-grant",
+      "builder": "bulk_grant_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/keys/bulk-revoke",
+      "builder": "bulk_revoke_keys"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/members/page",
+      "builder": "members_page"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/members/{account_community_id}",
+      "builder": "member"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/members/{account_community_id}/access-logs",
+      "builder": "member_access_logs"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/{account_community_id}/approve",
+      "builder": "approve_member"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/{account_community_id}/grant-keys",
+      "builder": "grant_keys"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/{account_community_id}/keys-disabled",
+      "builder": "set_keys_disabled"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/members/{account_community_id}/move-out-date",
+      "builder": "set_move_out_date"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/members/{account_community_id}/revoke-keys",
+      "builder": "revoke_keys"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/messages",
+      "builder": "messages"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/messages",
+      "builder": "message"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/my-notification-settings",
+      "builder": "my_notification_settings"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/my-notification-settings",
+      "builder": "set_my_notifications_enabled"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/my-notification-settings/quiet-hours",
+      "builder": "add_quiet_hours"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/my-notification-settings/quiet-hours/{quiet_hours_id}",
+      "builder": "remove_quiet_hours"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/nfc-tags",
+      "builder": "nfc_tags"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/nfc-tags/scan-log",
+      "builder": "nfc_scan_log"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/nfc-tags/{tag_id}",
+      "builder": "nfc_tag"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/nfc-tags/{tag_id}",
+      "builder": "update_nfc_tag"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/sense-lines",
+      "builder": "sense_lines"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/sense-lines/records",
+      "builder": "sense_line_records"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/sense-lines/{sense_line_id}",
+      "builder": "sense_line"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/sense-lines/{sense_line_id}",
+      "builder": "update_sense_line"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/settings",
+      "builder": "settings"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/settings",
+      "builder": "update_settings"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/short-codes",
+      "builder": "short_codes"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/short-codes",
+      "builder": "create_short_code"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/short-codes/{code}",
+      "builder": "assign_short_code"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/webhook-events",
+      "builder": "webhook_event_types"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/webhooks",
+      "builder": "webhooks"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/webhooks",
+      "builder": "create_webhook"
+    },
+    {
+      "method": "DELETE",
+      "path": "/v1/community/webhooks/{webhook_id}",
+      "builder": "delete_webhook"
+    },
+    {
+      "method": "PATCH",
+      "path": "/v1/community/webhooks/{webhook_id}",
+      "builder": "update_webhook"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/webhooks/{webhook_id}/deliveries",
+      "builder": "webhook_deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/webhooks/{webhook_id}/deliveries/retry-failed",
+      "builder": "retry_failed_deliveries"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/webhooks/{webhook_id}/deliveries/{delivery_id}/replay",
+      "builder": "replay_delivery"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/webhooks/{webhook_id}/rotate-secret",
+      "builder": "rotate_webhook_secret"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/community/webhooks/{webhook_id}/test",
+      "builder": "test_webhook"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events/stream",
+      "builder": "_sse.stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/me",
+      "builder": "me"
+    }
+  ]
+}
