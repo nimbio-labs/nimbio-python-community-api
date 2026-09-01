@@ -900,6 +900,23 @@ class endpoints:
                 {"limit": limit, "offset": offset}, None,
                 _m.AccessCodeLogPage.from_dict)
 
+    # The mode flip is its own endpoint, not a settings key: switching deletes
+    # every code in the community, so it runs the same 409
+    # `requires_confirmation` -> confirm=True handshake as the NFC-tag write.
+
+    @staticmethod
+    def access_code_mode():
+        return ("GET", "/v1/community/access-codes/mode", None, None,
+                _m.AccessCodeModeStatus.from_dict)
+
+    @staticmethod
+    def set_access_code_mode(mode: str, confirm: bool = False):
+        # The server honours only the JSON boolean `true`, so the flag is
+        # always sent as a real bool — never a string, never omitted.
+        body: dict = {"mode": str(mode), "confirm": bool(confirm)}
+        return ("PUT", "/v1/community/access-codes/mode", None, body,
+                _m.AccessCodeModeChange.from_dict)
+
     # -- GuestView Entry --------------------------------------------------- #
     #
     # Every one of these five returns the complete settings object, so the

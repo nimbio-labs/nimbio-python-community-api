@@ -78,6 +78,7 @@ CAPABILITIES: Tuple[str, ...] = (
     "settings",
     "sense_lines",
     "nfc_tags",
+    "access_code_mode",
 )
 
 #: The single capability an account-scoped key has. Community-scoped keys get

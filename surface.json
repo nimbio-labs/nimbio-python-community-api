@@ -1,7 +1,7 @@
 {
   "sdk": "python",
   "package": "nimbio-community-api",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "endpoints": [
     {
       "method": "GET",
@@ -42,6 +42,16 @@
       "method": "GET",
       "path": "/v1/community/access-codes/logs",
       "builder": "access_code_logs"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/community/access-codes/mode",
+      "builder": "access_code_mode"
+    },
+    {
+      "method": "PUT",
+      "path": "/v1/community/access-codes/mode",
+      "builder": "set_access_code_mode"
     },
     {
       "method": "DELETE",

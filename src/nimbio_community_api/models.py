@@ -13,7 +13,7 @@ yourself; the client builds them from API responses via ``from_dict``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 
 def _d(raw: Any) -> Dict[str, Any]:
@@ -1619,6 +1619,12 @@ class CommunitySettings:
     the settable ``settings["event_keys_override"]``
     (``inherit``/``allow``/``deny``) combined with the property type's default.
 
+    ``read_only.access_code_mode`` (``per_member`` / ``single_entry``) is the
+    one read-only value an API key *can* change — but only through
+    :meth:`community.set_access_code_mode`, because switching it deletes every
+    access code in the community and needs an explicit confirm. Sending it to
+    :meth:`community.update_settings` is a 422.
+
     ``terminology`` is the resolved member/home wording actually shown to
     members; ``terminology_options`` is the property type's picker list, which
     is where a ``*_terminology_option_id`` comes from. Both stay plain dicts —
@@ -2234,6 +2240,11 @@ class AccessCode:
     ``has_schedule`` says a recurring weekly window is attached; that window is
     evaluated in **the gate's own local timezone**, while ``expires_at`` is an
     absolute UTC cutoff. A code carrying both must satisfy both.
+
+    In ``single_entry`` mode (see :meth:`community.access_code_mode`) a row
+    also carries the owner's 3-letter ``preamble`` and ``entry_code_masked``
+    — preamble in clear, PIN masked (``"ESM******"``) — which is the shape of
+    what the visitor types. In ``per_member`` mode both are ``None``.
     """
 
     directory_access_code_id: Optional[Any]
@@ -2242,6 +2253,8 @@ class AccessCode:
     api_managed: bool = False
     code_masked: Optional[str] = None
     code_length: Optional[int] = None
+    preamble: Optional[str] = None
+    entry_code_masked: Optional[str] = None
     disabled: bool = False
     expires_at: Optional[str] = None
     has_schedule: bool = False
@@ -2270,6 +2283,8 @@ class AccessCode:
             api_managed=bool(code.get("api_managed")),
             code_masked=code.get("code_masked"),
             code_length=code.get("code_length"),
+            preamble=code.get("preamble"),
+            entry_code_masked=code.get("entry_code_masked"),
             disabled=bool(code.get("disabled")),
             expires_at=code.get("expires_at"),
             has_schedule=bool(code.get("has_schedule")),
@@ -2328,9 +2343,15 @@ class AccessCodeCreated:
     reveals it. Deliver it now; if you lose it, delete the code and mint a new
     one.
 
-    Because of that, ``code``, ``code_normalized`` and ``raw`` are kept out of
-    this object's ``repr`` — a create call logged at debug level should not
-    write a working PIN to disk.
+    In ``single_entry`` mode (see :meth:`community.access_code_mode`) the
+    visitor types the key owner's 3-letter ``preamble`` followed by the PIN,
+    and ``entry_code`` is that full string (``"ESM481502"``) — returned once,
+    like ``code``. In ``per_member`` mode both are ``None`` and the visitor
+    types ``code`` alone.
+
+    Because of that, ``code``, ``code_normalized``, ``entry_code`` and ``raw``
+    are kept out of this object's ``repr`` — a create call logged at debug
+    level should not write a working PIN to disk.
 
     A test-mode key validates and stores nothing: ``result`` is ``"simulated"``
     and the identifiers are absent.
@@ -2339,6 +2360,8 @@ class AccessCodeCreated:
     directory_access_code_id: Optional[Any]
     code: Optional[str] = field(default=None, repr=False)
     code_normalized: Optional[str] = field(default=None, repr=False)
+    preamble: Optional[str] = None
+    entry_code: Optional[str] = field(default=None, repr=False)
     account_id: Optional[str] = None
     key_id: Optional[str] = None
     latch_ids: List[str] = field(default_factory=list)
@@ -2358,6 +2381,8 @@ class AccessCodeCreated:
             directory_access_code_id=code.get("directory_access_code_id"),
             code=code.get("code"),
             code_normalized=code.get("code_normalized"),
+            preamble=code.get("preamble"),
+            entry_code=code.get("entry_code"),
             account_id=code.get("account_id"),
             key_id=code.get("key_id"),
             latch_ids=list(code.get("latch_ids") or []),
@@ -2511,6 +2536,145 @@ class AccessCodeLogPage:
             limit=d.get("limit"),
             offset=d.get("offset"),
             result=d.get("result"),
+            raw=d,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Access-code mode (per-member vs single-entry)
+# --------------------------------------------------------------------------- #
+
+AccessCodeMode = Literal["per_member", "single_entry"]
+"""The two access-code systems a community can run.
+
+``per_member`` — the default: a GuestView visitor picks the member they are
+visiting and types that member's PIN. ``single_entry`` — one "Enter access
+code" field for the whole community; every member carries a 3-letter
+**preamble** and the visitor types preamble + PIN (``ESM481502``).
+"""
+
+
+@dataclass
+class AccessCodeModePreview:
+    """What switching the access-code mode would do — a read-only dry run.
+
+    The same counts appear in three places: ``flip_preview`` on
+    :class:`AccessCodeModeStatus`, ``error.preview`` on the 409
+    ``requires_confirmation`` that :meth:`community.set_access_code_mode`
+    raises without ``confirm=True`` (reach it as ``ConflictError.preview``),
+    and ``would_change`` on a test key's simulated flip.
+
+    ``codes_to_delete`` is **every** code in the community — residents' own
+    included, not just this key's — because the strings change meaning with
+    the mode. ``members_affected`` is how many members lose at least one code
+    and will be notified. ``members_to_assign_preamble`` is how many would be
+    given a preamble (zero when switching back to ``per_member``).
+
+    ``mode`` is the community's *current* mode where the server includes it
+    (the 409 preview and ``would_change``); it is ``None`` on ``flip_preview``,
+    whose parent carries the current mode.
+    """
+
+    new_mode: Optional[str] = None
+    codes_to_delete: int = 0
+    members_affected: int = 0
+    members_to_assign_preamble: int = 0
+    mode: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def destructive(self) -> bool:
+        """True when confirming would delete at least one code."""
+        return self.codes_to_delete > 0
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccessCodeModePreview":
+        d = _d(raw)
+        return cls(
+            new_mode=d.get("new_mode"),
+            codes_to_delete=int(d.get("codes_to_delete") or 0),
+            members_affected=int(d.get("members_affected") or 0),
+            members_to_assign_preamble=int(
+                d.get("members_to_assign_preamble") or 0),
+            mode=d.get("mode"),
+            raw=d,
+        )
+
+
+@dataclass
+class AccessCodeModeStatus:
+    """Result of :meth:`community.access_code_mode` — the mode in force and
+    what switching to the other one would cost.
+
+    ``mode`` is ``per_member`` or ``single_entry`` (see :data:`AccessCodeMode`).
+    ``flip_preview`` is a dry run of :meth:`community.set_access_code_mode` to
+    the *other* mode; read it before flipping so a human sees the cost first.
+    """
+
+    mode: Optional[str]
+    flip_preview: AccessCodeModePreview = field(
+        default_factory=AccessCodeModePreview)
+    result: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def single_entry(self) -> bool:
+        return self.mode == "single_entry"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccessCodeModeStatus":
+        d = _d(raw)
+        return cls(
+            mode=d.get("mode"),
+            flip_preview=AccessCodeModePreview.from_dict(d.get("flip_preview")),
+            result=d.get("result"),
+            raw=d,
+        )
+
+
+@dataclass
+class AccessCodeModeChange:
+    """Result of :meth:`community.set_access_code_mode`, after the server
+    accepted the request.
+
+    Three outcomes land here (the fourth — the 409 asking for confirmation —
+    is raised as :class:`ConflictError`):
+
+    - **Unchanged**: the community was already in that mode. ``changed`` is
+      False and nothing happened.
+    - **Live flip**: ``changed`` is True; ``deleted_codes`` says how many codes
+      went and ``notified_members`` how many members were told.
+    - **Simulated** (test key with ``confirm=True``): ``simulated`` is True,
+      ``changed`` is False, and ``would_change`` carries the preview of what a
+      live key would have done. ``mode`` is ``None`` because nothing moved.
+    """
+
+    mode: Optional[str]
+    changed: bool = False
+    deleted_codes: int = 0
+    notified_members: int = 0
+    would_change: Optional[AccessCodeModePreview] = None
+    result: Optional[str] = None
+    request_id: Optional[str] = None
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def simulated(self) -> bool:
+        return self.result == "simulated"
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccessCodeModeChange":
+        d = _d(raw)
+        would = d.get("would_change")
+        return cls(
+            mode=d.get("mode"),
+            changed=bool(d.get("changed")),
+            deleted_codes=int(d.get("deleted_codes") or 0),
+            notified_members=int(d.get("notified_members") or 0),
+            would_change=(AccessCodeModePreview.from_dict(would)
+                          if isinstance(would, dict) else None),
+            result=d.get("result"),
+            request_id=d.get("request_id"),
             raw=d,
         )
 

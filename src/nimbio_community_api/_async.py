@@ -25,6 +25,9 @@ from .models import (
     AccessCodeDeleted,
     AccessCodeEligibleLatches,
     AccessCodeLogPage,
+    AccessCodeMode,
+    AccessCodeModeChange,
+    AccessCodeModeStatus,
     AccessCodes,
     AccessLogEntry,
     AccessLogPage,
@@ -637,6 +640,10 @@ class _AsyncCommunity:
         Entry. ``event_keys_enabled`` is the *resolved* answer for event keys,
         combining the settable ``event_keys_override``
         (``inherit``/``allow``/``deny``) with the property type's default.
+        ``access_code_mode`` (``per_member`` / ``single_entry``) is the one
+        read-only value an API key *can* change — but only through
+        :meth:`set_access_code_mode`, because switching it deletes every
+        access code in the community and needs an explicit confirm.
 
         Those flags and the two per-community caps
         (``event_key_max_window_hours``, ``limited_use_link_max_uses``) are
@@ -662,7 +669,9 @@ class _AsyncCommunity:
         ``is_open_log_history_enabled``, ``allow_guest_view_entry``,
         ``event_key_max_window_hours``, ``limited_use_link_max_uses``) — those
         are provisioned by Nimbio; the message says which and to contact
-        support.
+        support. So is ``access_code_mode``, but for a different reason: the
+        flip deletes every access code, so it lives behind its own confirm
+        handshake in :meth:`set_access_code_mode` and the 422 points there.
 
         Fifteen fields are settable: ``allow_directory_viewing``,
         ``allow_directory_access_codes``,
@@ -1022,7 +1031,12 @@ class _AsyncCommunity:
         are the only ones :meth:`update_access_code` and
         :meth:`delete_access_code` will touch; anything else answers 404.
         ``.feature_enabled`` mirrors the community's Directory Access Codes
-        setting — branch on it rather than on a 403."""
+        setting — branch on it rather than on a 403.
+
+        In ``single_entry`` mode (:meth:`access_code_mode`) each row also
+        carries the owner's 3-letter ``.preamble`` and ``.entry_code_masked``
+        — the preamble in clear, the PIN masked — which is the shape of what
+        the visitor types. In ``per_member`` mode both are None."""
         return await self._c._request(endpoints.access_codes())
 
     async def create_access_code(self, code: str, latch_ids: Sequence[str], *,
@@ -1035,6 +1049,12 @@ class _AsyncCommunity:
         **The PIN comes back exactly once — in this response.** Deliver it to
         the visitor now; no later call will reveal it, and
         :meth:`access_codes` masks it forever after.
+
+        In ``single_entry`` mode (:meth:`access_code_mode`) the visitor types
+        the key owner's 3-letter preamble followed by the PIN, and
+        ``.entry_code`` is that full string (``"ESM481502"``) — also returned
+        once. Hand the visitor ``.entry_code`` when it is set and ``.code``
+        otherwise.
 
         Three independent limits, which do different things:
 
@@ -1137,6 +1157,80 @@ class _AsyncCommunity:
         visitor's ``.client_ip`` and the code owner's name — this is the
         community's own log, the same one the CM portal shows."""
         return await self._c._request(endpoints.access_code_logs(limit, offset))
+
+    async def access_code_mode(self) -> AccessCodeModeStatus:
+        """Which of the two access-code systems the community runs, and what a
+        switch would cost.
+
+        - ``per_member`` — the default. A GuestView visitor finds the member
+          they are visiting, taps the lock on that row and types **that
+          member's** PIN. Codes are unique per member, so two members may hold
+          the same digits.
+        - ``single_entry`` — one "Enter access code" field for the whole
+          community, no member picking. Every member carries a 3-letter
+          **preamble** (A-Z, derived from their name, unique in the community)
+          and the visitor types preamble + PIN, e.g. ``ESM481502``. Codes this
+          key mints carry the key owner's preamble: :meth:`access_codes` rows
+          report ``preamble`` / ``entry_code_masked`` and
+          :meth:`create_access_code` returns the full ``entry_code`` once.
+
+        ``.flip_preview`` is a read-only dry run of :meth:`set_access_code_mode`
+        to the *other* mode: ``codes_to_delete`` (**every** code in the
+        community, residents' own included), ``members_affected`` (how many
+        lose a code and get notified) and ``members_to_assign_preamble``. Read
+        it before you flip, so a human sees the cost first. The same value is
+        reported read-only as ``read_only["access_code_mode"]`` by
+        :meth:`settings`."""
+        return await self._c._request(endpoints.access_code_mode())
+
+    async def set_access_code_mode(self, mode: AccessCodeMode, *,
+                             confirm: bool = False) -> AccessCodeModeChange:
+        """Switch the community between ``per_member`` and ``single_entry``
+        access codes.
+
+        **This is destructive.** Switching in either direction deletes
+        **every** access code in the community — the ones this key minted, the
+        ones other integrations minted, and the ones residents made for
+        themselves in the app — because a code's meaning changes with the mode
+        (``481502`` versus ``ESM481502``). Every member who lost a code is
+        notified by push and a community-wide message explains the new system.
+        Switching to ``single_entry`` also assigns a preamble to every member
+        who lacks one. Redemption log rows are kept.
+
+        So it is the same two-step handshake as :meth:`update_nfc_tag`:
+
+        1. Call with ``confirm=False`` (the default). If the community is
+           already in that mode you get ``.changed == False`` and nothing
+           happens. Otherwise :class:`ConflictError` **(409
+           ``requires_confirmation``)** is raised — a warning, not a veto —
+           with the flip preview on ``e.preview``, and again nothing happens.
+        2. Show the preview to a human, then repeat with ``confirm=True``. The
+           live result reports ``.deleted_codes`` and ``.notified_members``::
+
+            try:
+                await client.community.set_access_code_mode("single_entry")
+            except ConflictError as e:
+                if e.code != "requires_confirmation":
+                    raise
+                preview = models.AccessCodeModePreview.from_dict(e.preview)
+                print(f"deletes {preview.codes_to_delete} codes")
+                await client.community.set_access_code_mode("single_entry",
+                                                      confirm=True)
+
+        Passing ``confirm=True`` unconditionally opts out of the safety net —
+        do that only behind your own confirmation step.
+
+        This is deliberately **not** a key of :meth:`update_settings`: a
+        generic settings write must never wipe every code by accident, so
+        sending ``access_code_mode`` there is a 422 pointing here. An unknown
+        ``mode`` is 422 ``invalid_mode``; a community with Directory Access
+        Codes off answers 403 ``access_codes_disabled``.
+
+        **Test keys** run the 409 handshake exactly as above, and
+        ``confirm=True`` then answers ``.simulated`` with ``.would_change`` —
+        the same preview — deleting and notifying nothing."""
+        return await self._c._request(
+            endpoints.set_access_code_mode(mode, confirm=confirm))
 
     # -- GuestView Entry ------------------------------------------------------ #
 

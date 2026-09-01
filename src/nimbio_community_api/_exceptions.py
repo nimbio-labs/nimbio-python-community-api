@@ -11,7 +11,7 @@ error, or a specific subclass (e.g. :class:`RateLimitError`) for fine control.
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional
 
 
 class NimbioError(Exception):
@@ -108,10 +108,28 @@ class ConflictError(APIError):
       repeated failures. Re-enable it yourself with
       ``update_webhook(webhook_id, active=True)``, then retry.
     - ``requires_confirmation`` — a warning, not a veto. The same call succeeds
-      when repeated with ``"confirm": true``.
+      when repeated with ``"confirm": true``. When the server attaches a
+      dry run of what confirming would do (the access-code mode flip does),
+      it is on :attr:`preview`.
     - ``already_accepted`` — from :meth:`community.approve_member`: that member
       is already an accepted member, so there is nothing to approve.
     """
+
+    @property
+    def preview(self) -> Optional[Dict[str, Any]]:
+        """``error.preview`` from the envelope, or ``None`` when there is none.
+
+        A ``requires_confirmation`` refusal that knows what confirming would
+        cost says so here — for :meth:`community.set_access_code_mode` that is
+        the flip preview (``codes_to_delete``, ``members_affected``, ...), the
+        same counts :meth:`community.access_code_mode` reports. Parse it with
+        ``models.AccessCodeModePreview.from_dict(e.preview)``.
+        """
+        if not isinstance(self.response, dict):
+            return None
+        err = self.response.get("error")
+        preview = err.get("preview") if isinstance(err, dict) else None
+        return preview if isinstance(preview, dict) else None
 
 
 class RateLimitError(APIError):
