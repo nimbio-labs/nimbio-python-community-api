@@ -41,6 +41,9 @@ mode switch and the new per-member preamble fields.
   `repr` for the same reason.
 - `CommunitySettings.read_only["access_code_mode"]` — the mode, reported
   read-only by `settings()`.
+- `AccessCodes.access_code_mode` — the list read reports the mode its rows
+  were read under, beside `feature_enabled`. The mode routes themselves are
+  not gated on the Directory Access Codes setting.
 - `CAPABILITIES` gains `"access_code_mode"` (22 names).
 - `surface.json` now lists 95 operations.
 

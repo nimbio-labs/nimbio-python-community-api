@@ -2304,10 +2304,15 @@ class AccessCodes:
     ``feature_enabled`` mirrors the community's Directory Access Codes setting.
     When it is False the list still reads, but every write answers 403
     ``access_codes_disabled`` — branch on it rather than on an exception.
+
+    ``access_code_mode`` is the mode the rows were read under — ``per_member``
+    or ``single_entry`` (see :class:`AccessCodeModeStatus`) — so one call says
+    whether to show each row's ``entry_code_masked`` or its ``code_masked``.
     """
 
     access_codes: List[AccessCode] = field(default_factory=list)
     feature_enabled: bool = False
+    access_code_mode: Optional[str] = None
     result: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -2329,6 +2334,7 @@ class AccessCodes:
             access_codes=[AccessCode.from_dict(x)
                           for x in (d.get("access_codes") or [])],
             feature_enabled=bool(d.get("feature_enabled")),
+            access_code_mode=d.get("access_code_mode"),
             result=d.get("result"),
             raw=d,
         )

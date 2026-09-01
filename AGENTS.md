@@ -407,7 +407,8 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
   every member has a 3-letter **preamble** and the visitor types preamble + PIN
   (`ESM481502`). In that mode `access_codes()` rows carry `preamble` /
   `entry_code_masked`, and `create_access_code()` returns the full `entry_code`
-  **once** — deliver `entry_code` when set, `code` otherwise.
+  **once** — deliver `entry_code` when set, `code` otherwise. The list also
+  reports `.access_code_mode`, so one call tells you how to present the rows.
 - **`set_access_code_mode()` deletes every access code in the community** in
   either direction — this key's, other integrations', and residents' own — and
   notifies every affected member by push plus a community-wide message.
@@ -424,7 +425,8 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
   `settings().read_only["access_code_mode"]`.
 - Test keys run the same 409 handshake; `confirm=True` then returns
   `.simulated` with `.would_change` (the preview) and deletes nothing.
-- Unknown mode: 422 `invalid_mode`. Feature off: 403 `access_codes_disabled`.
+- Unknown mode: 422 `invalid_mode`. The mode routes are **not** gated on the
+  Directory Access Codes setting — they work while the feature is off.
 
 ```python
 try:

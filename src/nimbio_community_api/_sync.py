@@ -1049,7 +1049,9 @@ class _SyncCommunity:
         In ``single_entry`` mode (:meth:`access_code_mode`) each row also
         carries the owner's 3-letter ``.preamble`` and ``.entry_code_masked``
         — the preamble in clear, the PIN masked — which is the shape of what
-        the visitor types. In ``per_member`` mode both are None."""
+        the visitor types. In ``per_member`` mode both are None.
+        ``.access_code_mode`` names the mode the list was read under, so one
+        call tells you how to present the rows."""
         return self._c._request(endpoints.access_codes())
 
     def create_access_code(self, code: str, latch_ids: Sequence[str], *,
@@ -1236,8 +1238,9 @@ class _SyncCommunity:
         This is deliberately **not** a key of :meth:`update_settings`: a
         generic settings write must never wipe every code by accident, so
         sending ``access_code_mode`` there is a 422 pointing here. An unknown
-        ``mode`` is 422 ``invalid_mode``; a community with Directory Access
-        Codes off answers 403 ``access_codes_disabled``.
+        ``mode`` is 422 ``invalid_mode``. Neither mode call is gated on the
+        Directory Access Codes setting — the mode can be read and switched
+        while the feature is off.
 
         **Test keys** run the 409 handshake exactly as above, and
         ``confirm=True`` then answers ``.simulated`` with ``.would_change`` —

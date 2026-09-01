@@ -657,15 +657,23 @@ def test_set_access_code_mode_unknown_mode_is_a_422(client):
 
 
 @respx.mock
-def test_set_access_code_mode_is_403_when_the_feature_is_off(client):
-    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
-        return_value=httpx.Response(403, json={"error": {
-            "code": "access_codes_disabled",
-            "message": "Directory access codes are off"}}))
+def test_mode_routes_are_not_gated_on_the_feature_flag(client):
+    """The mode can be read and switched while Directory Access Codes is off —
+    the 403 the other access-code writes answer does not apply here."""
+    respx.get(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "per_member",
+            "flip_preview": {**_FLIP_PREVIEW, "codes_to_delete": 0,
+                             "members_affected": 0}}))
+    respx.get(f"{PROD}/v1/community/access-codes").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "feature_enabled": False,
+            "access_code_mode": "per_member", "access_codes": []}))
 
-    with pytest.raises(PermissionDeniedError) as e:
-        client.community.set_access_code_mode("single_entry", confirm=True)
-    assert e.value.code == "access_codes_disabled"
+    assert client.community.access_codes().feature_enabled is False
+    status = client.community.access_code_mode()
+    assert status.mode == "per_member"
+    assert status.flip_preview.destructive is False
 
 
 @respx.mock
@@ -673,10 +681,13 @@ def test_single_entry_rows_carry_the_preamble_and_a_masked_entry_code(client):
     respx.get(f"{PROD}/v1/community/access-codes").mock(
         return_value=httpx.Response(200, json={
             "result": "ok", "feature_enabled": True,
+            "access_code_mode": "single_entry",
             "access_codes": [{**_ACCESS_CODE, "preamble": "ESM",
                               "entry_code_masked": "ESM******"}]}))
 
-    row = client.community.access_codes().access_codes[0]
+    codes = client.community.access_codes()
+    assert codes.access_code_mode == "single_entry"
+    row = codes.access_codes[0]
     assert row.preamble == "ESM"
     assert row.entry_code_masked == "ESM******"
     assert row.code_masked == "******", "the PIN half stays masked"
@@ -994,6 +1005,7 @@ def test_models_tolerate_an_empty_or_odd_payload():
     assert models.GuestLinkLatchExclusions.from_dict(
         {"excluded_latch_ids": "nope"}).by_type == {}
     assert models.AccessCodes.from_dict({}).feature_enabled is False
+    assert models.AccessCodes.from_dict({}).access_code_mode is None
     assert models.AccessCodeCreated.from_dict({}).code is None
     assert models.AccessCodeDeleted.from_dict({}).simulated is False
     assert models.AccessCodeEligibleLatches.from_dict({}).latch_ids == []
@@ -1195,6 +1207,7 @@ async def test_async_access_code_mode_family(test_key):
     respx.get(f"{PROD}/v1/community/access-codes").mock(
         return_value=httpx.Response(200, json={
             "result": "ok", "feature_enabled": True,
+            "access_code_mode": "single_entry",
             "access_codes": [{**_ACCESS_CODE, "preamble": "ESM",
                               "entry_code_masked": "ESM******"}]}))
     respx.post(f"{PROD}/v1/community/access-codes").mock(
@@ -1253,7 +1266,9 @@ async def test_async_access_code_mode_family(test_key):
         assert e2.value.code == "invalid_mode"
 
         # The new fields parse on the async client too.
-        row = (await client.community.access_codes()).access_codes[0]
+        codes = await client.community.access_codes()
+        assert codes.access_code_mode == "single_entry"
+        row = codes.access_codes[0]
         assert (row.preamble, row.entry_code_masked) == ("ESM", "ESM******")
         created = await client.community.create_access_code("481502", ["l1"])
         assert created.entry_code == "ESM481502"

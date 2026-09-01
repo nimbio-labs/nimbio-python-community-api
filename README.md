@@ -657,8 +657,8 @@ runs. In `per_member` (the default) a GuestView visitor picks the member they ar
 visiting and types that member's PIN. In `single_entry` there is one "Enter
 access code" field for the whole community: every member carries a 3-letter
 **preamble** and the visitor types preamble + PIN (`ESM481502`). In that mode
-list rows carry `preamble` / `entry_code_masked` and `create_access_code()`
-returns the full `entry_code` once — hand the visitor `entry_code` when it is
+list rows carry `preamble` / `entry_code_masked` (and the list itself
+`access_code_mode`) and `create_access_code()` returns the full `entry_code` once — hand the visitor `entry_code` when it is
 set, `code` otherwise.
 
 **Switching modes deletes every access code in the community** — this key's,
