@@ -593,6 +593,8 @@ Keypad and GuestView PINs.
 | `delete_access_code(directory_access_code_id)` | `AccessCodeDeleted` |
 | `access_code_eligible_latches()` | `AccessCodeEligibleLatches` — the allowlist |
 | `access_code_logs(*, limit=50, offset=0)` | `AccessCodeLogPage` |
+| `access_code_mode()` | `AccessCodeModeStatus` — `per_member` / `single_entry` + `flip_preview` |
+| `set_access_code_mode(mode, *, confirm=False)` | `AccessCodeModeChange` — **destructive; 409 until `confirm=True`** |
 
 **The PIN comes back exactly once — from `create_access_code()`.** The list
 read returns `code_masked` (asterisks) and `code_length`, and nothing reads the
@@ -649,6 +651,36 @@ gate survives the code. In `access_code_logs()`, `code_entered_masked` is
 asterisks and never the typed digits — a successful attempt's entered code *is*
 a working PIN — so correlate rows to your codes through
 `directory_access_code_id`.
+
+**Two access-code systems.** `access_code_mode()` says which one the community
+runs. In `per_member` (the default) a GuestView visitor picks the member they are
+visiting and types that member's PIN. In `single_entry` there is one "Enter
+access code" field for the whole community: every member carries a 3-letter
+**preamble** and the visitor types preamble + PIN (`ESM481502`). In that mode
+list rows carry `preamble` / `entry_code_masked` and `create_access_code()`
+returns the full `entry_code` once — hand the visitor `entry_code` when it is
+set, `code` otherwise.
+
+**Switching modes deletes every access code in the community** — this key's,
+other integrations', and the ones residents made in the app — and notifies the
+affected members, so `set_access_code_mode()` is the same two-step handshake as
+`update_nfc_tag()`: the first call answers 409 `requires_confirmation` with the
+preview on `ConflictError.preview` (also readable up front as
+`access_code_mode().flip_preview`), and nothing happens until you repeat with
+`confirm=True`. It is deliberately **not** a key of `update_settings()`, which
+refuses `access_code_mode` with a 422 pointing here.
+
+```python
+try:
+    client.community.set_access_code_mode("single_entry")
+except ConflictError as e:
+    if e.code != "requires_confirmation":
+        raise
+    preview = models.AccessCodeModePreview.from_dict(e.preview)
+    if ask_a_human(f"Delete {preview.codes_to_delete} codes held by "
+                   f"{preview.members_affected} members?"):
+        client.community.set_access_code_mode("single_entry", confirm=True)
+```
 
 ### `client.community` — GuestView Entry
 

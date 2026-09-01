@@ -191,6 +191,8 @@ with NimbioClient("nimbio_test_...") as client:
     client.community.delete_access_code(CODE_ID)                  # api_managed only
     client.community.access_code_eligible_latches()    # the CM-set allowlist
     client.community.access_code_logs(limit=50, offset=0)
+    client.community.access_code_mode()                # per_member | single_entry + flip_preview
+    client.community.set_access_code_mode("single_entry")  # 409 -> preview -> confirm=True
 
     # GuestView Entry — all five return the WHOLE settings object
     entry = client.community.guest_view_entry()             # -> GuestViewEntry
@@ -397,6 +399,44 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
   `code_entered_masked` is always asterisks — a successful attempt's digits
   *are* a working PIN — so correlate through `directory_access_code_id`.
 
+## Access-code mode: the flip DELETES EVERY CODE (read before switching)
+
+- `access_code_mode()` says which system the community runs. `per_member`
+  (default): a GuestView visitor picks the member and types **that member's**
+  PIN. `single_entry`: one "Enter access code" field for the whole community;
+  every member has a 3-letter **preamble** and the visitor types preamble + PIN
+  (`ESM481502`). In that mode `access_codes()` rows carry `preamble` /
+  `entry_code_masked`, and `create_access_code()` returns the full `entry_code`
+  **once** — deliver `entry_code` when set, `code` otherwise.
+- **`set_access_code_mode()` deletes every access code in the community** in
+  either direction — this key's, other integrations', and residents' own — and
+  notifies every affected member by push plus a community-wide message.
+  Switching to `single_entry` also assigns preambles. Log rows survive.
+- It is the **NFC-style handshake**: the first call (no `confirm`) is a dry run
+  — `.changed == False` if already in that mode, else 409
+  `requires_confirmation` with the counts on `ConflictError.preview`
+  (`codes_to_delete`, `members_affected`, `members_to_assign_preamble`; also
+  readable up front as `access_code_mode().flip_preview`). **Show them to a
+  human**, then repeat with `confirm=True`. Never pass `confirm=True` on the
+  first call.
+- It is **not** a settings key: `update_settings({"access_code_mode": ...})`
+  is a 422 pointing at `set_access_code_mode()`. Read it as
+  `settings().read_only["access_code_mode"]`.
+- Test keys run the same 409 handshake; `confirm=True` then returns
+  `.simulated` with `.would_change` (the preview) and deletes nothing.
+- Unknown mode: 422 `invalid_mode`. Feature off: 403 `access_codes_disabled`.
+
+```python
+try:
+    client.community.set_access_code_mode("single_entry")
+except ConflictError as e:
+    if e.code != "requires_confirmation":
+        raise
+    preview = models.AccessCodeModePreview.from_dict(e.preview)
+    # ask the human: preview.codes_to_delete, preview.members_affected
+    client.community.set_access_code_mode("single_entry", confirm=True)
+```
+
 ## GuestView Entry: the latch write REPLACES everything (read before writing)
 
 - **`set_guest_view_entry_latches()` replaces the whole set** — hence the PUT.
@@ -562,12 +602,12 @@ from nimbio_community_api import (
 client.me().key.has_capability("hold_opens")     # or has_capability(caps, "...")
 ```
 
-`CAPABILITIES` — the 21 names a community-scoped key carries (`open`,
+`CAPABILITIES` — the 22 names a community-scoped key carries (`open`,
 `gate_status`, `key_statuses`, `hold_opens`, `webhooks`, `members`, `messages`,
 `access_logs`, `key_schedules`, `key_usage`, `change_logs`, `homes`,
 `short_codes`, `guest_view_entry`, `access_codes`, `guest_links`, `map`,
-`open_notifications`, `settings`, `sense_lines`, `nfc_tags`). An account-scoped
-key has only `open`.
+`open_notifications`, `settings`, `sense_lines`, `nfc_tags`,
+`access_code_mode`). An account-scoped key has only `open`.
 
 `STREAM_EVENT_TYPES` — the ten event types Nimbio delivers. There is **one**
 event vocabulary, not two: a webhook subscribes to names from this same list,
@@ -659,6 +699,9 @@ and two of them are already in your head from the sections above:
   and the caps `event_key_max_window_hours` / `limited_use_link_max_uses` are
   **read-only** provisioning decisions — detect them under `.read_only`, and
   contact Nimbio to change one. Sending one to the patch is a 422.
+- `access_code_mode` is read-only here too, but for a different reason: the
+  flip deletes every access code, so it has its own confirm handshake in
+  `set_access_code_mode()`. Sending it to the patch is a 422 pointing there.
 - `.feature(name)` on the read is the alternative to calling a gated endpoint
   and interpreting its 403 — that is the reason `settings()` is worth calling.
 - Per terminology side, a custom label and a picker option are **mutually

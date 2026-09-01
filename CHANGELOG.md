@@ -3,6 +3,47 @@
 All notable changes to `nimbio-community-api` are documented here. This project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-09-01
+
+Single-entry access codes: a community can now run one "Enter access code"
+field for everyone instead of a PIN per member, and this release exposes the
+mode switch and the new per-member preamble fields.
+
+### Added
+
+- **`community.access_code_mode()`** → `AccessCodeModeStatus` — whether the
+  community runs `per_member` (the default: the visitor picks a member and
+  types that member's PIN) or `single_entry` (every member carries a 3-letter
+  **preamble** and the visitor types preamble + PIN, e.g. `ESM481502`), plus
+  `.flip_preview` (`AccessCodeModePreview`): a dry run of switching to the
+  other mode — `codes_to_delete`, `members_affected`,
+  `members_to_assign_preamble`.
+- **`community.set_access_code_mode(mode, *, confirm=False)`** →
+  `AccessCodeModeChange`. **Switching is destructive**: it deletes **every**
+  access code in the community — this key's, other integrations', and the ones
+  residents made in the app — and notifies the affected members. So it is the
+  same two-step handshake as `update_nfc_tag()`: without `confirm=True` the
+  call is a dry run that raises `ConflictError` (409 `requires_confirmation`)
+  with the preview, or returns `.changed == False` when the community is
+  already in that mode. Repeat with `confirm=True` to flip; the result reports
+  `.deleted_codes` and `.notified_members`. Test keys run the same handshake
+  and then answer `.simulated` with `.would_change`. The flip is deliberately
+  **not** a key of `update_settings()`, which refuses `access_code_mode` with a
+  422 pointing at the new method.
+- **`ConflictError.preview`** — the `error.preview` dict a
+  `requires_confirmation` refusal may carry (`None` when it does not). Parse
+  the mode flip's with `models.AccessCodeModePreview.from_dict(e.preview)`.
+- `models.AccessCodeMode` (`Literal["per_member", "single_entry"]`).
+- `AccessCode.preamble` / `.entry_code_masked` on list rows and
+  `AccessCodeCreated.preamble` / `.entry_code` on the create result — set in
+  `single_entry` mode, `None` in `per_member`. `entry_code` is the full string
+  the visitor types and is returned once, like `code`; it is kept out of the
+  `repr` for the same reason.
+- `CommunitySettings.read_only["access_code_mode"]` — the mode, reported
+  read-only by `settings()`.
+- `CAPABILITIES` gains `"access_code_mode"` (22 names).
+- `surface.json` now lists 95 operations.
+
 ## [0.6.0] - 2026-08-27
 
 Full parity with the public REST API. The client now wraps **all 93 documented
