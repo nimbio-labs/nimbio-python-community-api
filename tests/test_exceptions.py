@@ -86,3 +86,21 @@ def test_conflict_is_catchable_as_an_api_error():
     assert isinstance(err, e.APIError)
     assert isinstance(err, e.NimbioError)
     assert err.code == "delivery_in_flight"
+
+
+def test_conflict_preview_is_the_envelopes_preview_or_none():
+    """`requires_confirmation` may carry a dry run of what confirming would do;
+    anything else — no envelope, no preview, a malformed one — reads None."""
+    with_preview = e.ConflictError(
+        "re-send", status_code=409, code="requires_confirmation",
+        response={"error": {"code": "requires_confirmation",
+                            "preview": {"codes_to_delete": 14}}})
+    assert with_preview.preview == {"codes_to_delete": 14}
+
+    assert e.ConflictError("x", status_code=409, response=None).preview is None
+    assert e.ConflictError("x", status_code=409,
+                           response={"error": {"code": "c"}}).preview is None
+    assert e.ConflictError("x", status_code=409,
+                           response={"error": "nope"}).preview is None
+    assert e.ConflictError("x", status_code=409,
+                           response={"error": {"preview": "nope"}}).preview is None

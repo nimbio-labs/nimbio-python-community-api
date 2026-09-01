@@ -24,9 +24,9 @@ def test_capabilities_are_the_api_declared_names():
         "members", "messages", "access_logs", "key_schedules", "key_usage",
         "change_logs", "homes", "short_codes", "guest_view_entry",
         "access_codes", "guest_links", "map", "open_notifications",
-        "settings", "sense_lines", "nfc_tags")
-    assert len(CAPABILITIES) == 21
-    assert len(set(CAPABILITIES)) == 21
+        "settings", "sense_lines", "nfc_tags", "access_code_mode")
+    assert len(CAPABILITIES) == 22
+    assert len(set(CAPABILITIES)) == 22
 
 
 def test_stream_event_types_are_the_servers_ten():

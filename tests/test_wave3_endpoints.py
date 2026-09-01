@@ -22,6 +22,7 @@ import pytest
 import respx
 
 from nimbio_community_api import (
+    APIError,
     AsyncNimbioClient,
     ConflictError,
     NimbioClient,
@@ -88,6 +89,13 @@ _ACCESS_CODE = {
     "latch_ids": ["l1"],
     "latches": [{"id": "l1", "name": "Service Entrance"}],
     "owner_name": "Front Desk",
+}
+
+_FLIP_PREVIEW = {
+    "new_mode": "single_entry",
+    "codes_to_delete": 14,
+    "members_affected": 9,
+    "members_to_assign_preamble": 112,
 }
 
 _GUEST_VIEW_ENTRY = {
@@ -495,6 +503,220 @@ def test_access_code_logs_mask_the_entered_digits(client):
     assert row.client_ip == "203.0.113.9"
 
 
+# -- access-code mode --------------------------------------------------------- #
+
+@respx.mock
+def test_access_code_mode_reports_the_mode_and_the_cost_of_flipping(client):
+    respx.get(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "per_member",
+            "flip_preview": _FLIP_PREVIEW}))
+
+    status = client.community.access_code_mode()
+    assert status.mode == "per_member"
+    assert status.single_entry is False
+    assert status.flip_preview.new_mode == "single_entry"
+    assert status.flip_preview.codes_to_delete == 14
+    assert status.flip_preview.members_affected == 9
+    assert status.flip_preview.members_to_assign_preamble == 112
+    assert status.flip_preview.destructive is True
+    # The GET preview has no `mode` of its own — the parent carries it.
+    assert status.flip_preview.mode is None
+
+
+@respx.mock
+def test_set_access_code_mode_sends_confirm_as_a_real_boolean(client):
+    """The server honours only the JSON boolean `true`, so the flag must
+    always be on the wire as a bool — never omitted, never a string."""
+    route = respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "single_entry", "changed": False,
+            "request_id": "b1c2"}))
+
+    client.community.set_access_code_mode("single_entry")
+    assert _body(route) == {"mode": "single_entry", "confirm": False}
+
+    client.community.set_access_code_mode("single_entry", confirm=True)
+    assert _body(route) == {"mode": "single_entry", "confirm": True}
+
+
+@respx.mock
+def test_set_access_code_mode_already_there_is_a_no_op(client):
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "single_entry", "changed": False,
+            "request_id": "b1c2"}))
+
+    change = client.community.set_access_code_mode("single_entry")
+    assert change.changed is False
+    assert change.mode == "single_entry"
+    assert change.deleted_codes == 0 and change.notified_members == 0
+    assert change.would_change is None
+    assert change.simulated is False
+    assert change.request_id == "b1c2"
+
+
+@respx.mock
+def test_set_access_code_mode_without_confirm_is_a_409_with_the_preview(client):
+    """The flip deletes every code in the community, so the first call is a
+    dry run: 409 `requires_confirmation` with the preview attached — the same
+    warning-not-veto handshake as `update_nfc_tag`, plus the preview."""
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(409, json={"error": {
+            "code": "requires_confirmation",
+            "message": "Switching access code mode deletes every existing "
+                       "access code in the community. Re-send with "
+                       "confirm: true.",
+            "preview": {**_FLIP_PREVIEW, "mode": "per_member"},
+            "request_id": "b1c2"}}))
+
+    with pytest.raises(ConflictError) as e:
+        client.community.set_access_code_mode("single_entry")
+    assert e.value.code == "requires_confirmation"
+    assert e.value.status_code == 409
+    assert e.value.request_id == "b1c2"
+    assert e.value.preview == {**_FLIP_PREVIEW, "mode": "per_member"}
+
+    preview = models.AccessCodeModePreview.from_dict(e.value.preview)
+    assert preview.mode == "per_member"
+    assert preview.new_mode == "single_entry"
+    assert preview.codes_to_delete == 14
+    assert preview.destructive is True
+
+
+@respx.mock
+def test_set_access_code_mode_confirmed_reports_what_it_did(client):
+    """The documented flow: 409 without confirm, then the real flip with it."""
+    calls = {"n": 0}
+
+    def responder(request):
+        calls["n"] += 1
+        body = _json.loads(request.content)
+        if body.get("confirm") is not True:
+            return httpx.Response(409, json={"error": {
+                "code": "requires_confirmation", "message": "Re-send.",
+                "preview": {**_FLIP_PREVIEW, "mode": "per_member"}}})
+        return httpx.Response(200, json={
+            "result": "ok", "mode": "single_entry", "changed": True,
+            "deleted_codes": 14, "notified_members": 9,
+            "request_id": "b1c2"})
+
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        side_effect=responder)
+
+    try:
+        client.community.set_access_code_mode("single_entry")
+    except ConflictError as e:
+        if e.code != "requires_confirmation":
+            raise
+        change = client.community.set_access_code_mode("single_entry",
+                                                       confirm=True)
+    assert calls["n"] == 2
+    assert change.changed is True
+    assert change.mode == "single_entry"
+    assert change.deleted_codes == 14
+    assert change.notified_members == 9
+    assert change.simulated is False
+    assert change.would_change is None
+
+
+@respx.mock
+def test_set_access_code_mode_test_key_is_simulated_with_the_preview(client):
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "simulated",
+            "would_change": {**_FLIP_PREVIEW, "mode": "per_member"},
+            "request_id": "b1c2"}))
+
+    change = client.community.set_access_code_mode("single_entry",
+                                                   confirm=True)
+    assert change.simulated is True
+    assert change.changed is False
+    assert change.mode is None, "nothing moved, so no mode to report"
+    assert change.deleted_codes == 0 and change.notified_members == 0
+    assert change.would_change is not None
+    assert change.would_change.mode == "per_member"
+    assert change.would_change.new_mode == "single_entry"
+    assert change.would_change.codes_to_delete == 14
+    assert change.would_change.members_to_assign_preamble == 112
+
+
+@respx.mock
+def test_set_access_code_mode_unknown_mode_is_a_422(client):
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(422, json={"error": {
+            "code": "invalid_mode",
+            "message": "Unknown access code mode 'keypad'; expected "
+                       "per_member or single_entry"}}))
+
+    # 422 has no dedicated subclass; the code is what identifies it.
+    with pytest.raises(APIError) as e:
+        client.community.set_access_code_mode("keypad")  # type: ignore[arg-type]
+    assert e.value.code == "invalid_mode"
+    assert e.value.status_code == 422
+
+
+@respx.mock
+def test_set_access_code_mode_is_403_when_the_feature_is_off(client):
+    respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(403, json={"error": {
+            "code": "access_codes_disabled",
+            "message": "Directory access codes are off"}}))
+
+    with pytest.raises(PermissionDeniedError) as e:
+        client.community.set_access_code_mode("single_entry", confirm=True)
+    assert e.value.code == "access_codes_disabled"
+
+
+@respx.mock
+def test_single_entry_rows_carry_the_preamble_and_a_masked_entry_code(client):
+    respx.get(f"{PROD}/v1/community/access-codes").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "feature_enabled": True,
+            "access_codes": [{**_ACCESS_CODE, "preamble": "ESM",
+                              "entry_code_masked": "ESM******"}]}))
+
+    row = client.community.access_codes().access_codes[0]
+    assert row.preamble == "ESM"
+    assert row.entry_code_masked == "ESM******"
+    assert row.code_masked == "******", "the PIN half stays masked"
+    assert "481502" not in repr(row)
+
+
+def test_per_member_rows_have_no_preamble():
+    row = models.AccessCode.from_dict(_ACCESS_CODE)
+    assert row.preamble is None and row.entry_code_masked is None
+
+
+@respx.mock
+def test_create_access_code_returns_the_full_entry_code_once(client):
+    respx.post(f"{PROD}/v1/community/access-codes").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "request_id": "b1c2", "access_code": {
+                "code": "481502", "code_normalized": "481502",
+                "preamble": "ESM", "entry_code": "ESM481502",
+                "directory_access_code_id": 412, "key_id": "k1",
+                "latch_ids": ["l1"]}}))
+
+    created = client.community.create_access_code("481502", ["l1"])
+    assert created.preamble == "ESM"
+    assert created.entry_code == "ESM481502"
+    # The full entry string is a working credential, exactly like `code`.
+    assert "481502" not in repr(created)
+    assert "ESM" in repr(created), "the preamble alone is not secret"
+
+
+def test_settings_reports_the_access_code_mode_as_read_only():
+    s = models.CommunitySettings.from_dict({
+        "result": "ok", "community_id": 2585, "settings": {},
+        "read_only": {"allow_hold_opens": True,
+                      "access_code_mode": "single_entry"}})
+    assert s.read_only["access_code_mode"] == "single_entry"
+    # It is a value, not a flag — `feature()` is the wrong accessor for it,
+    # and this pins that it stays out of `settings` (the writable half).
+    assert s.setting("access_code_mode") is None
+
+
 # -- GuestView Entry ---------------------------------------------------------- #
 
 @respx.mock
@@ -776,6 +998,14 @@ def test_models_tolerate_an_empty_or_odd_payload():
     assert models.AccessCodeDeleted.from_dict({}).simulated is False
     assert models.AccessCodeEligibleLatches.from_dict({}).latch_ids == []
     assert models.AccessCodeLogPage.from_dict({}).logs == []
+    assert models.AccessCodeModeStatus.from_dict({}).mode is None
+    assert models.AccessCodeModeStatus.from_dict(
+        {"flip_preview": "nope"}).flip_preview.codes_to_delete == 0
+    assert models.AccessCodeModePreview.from_dict(
+        {"codes_to_delete": None}).destructive is False
+    assert models.AccessCodeModeChange.from_dict({}).changed is False
+    assert models.AccessCodeModeChange.from_dict(
+        {"would_change": "nope"}).would_change is None
     assert models.GuestViewEntry.from_dict({}).allowed is False
     assert models.GuestViewEntryLogPage.from_dict({}).has_more is False
     assert models.ShortCode.from_dict({}).short_code is None
@@ -788,8 +1018,8 @@ def test_a_test_key_write_reports_itself_as_simulated():
     """Every wave-3 write is side-effecting — minting a gate link, a PIN, or a
     permission change — so each result has to say when nothing happened."""
     for model in (models.GuestLink, models.AccessCode, models.AccessCodeCreated,
-                  models.AccessCodeDeleted, models.GuestViewEntry,
-                  models.ShortCode):
+                  models.AccessCodeDeleted, models.AccessCodeModeChange,
+                  models.GuestViewEntry, models.ShortCode):
         assert model.from_dict({"result": "simulated"}).simulated is True
         assert model.from_dict({"result": "ok"}).simulated is False
 
@@ -836,6 +1066,8 @@ WAVE3_METHODS = (
     "delete_access_code",
     "access_code_eligible_latches",
     "access_code_logs",
+    "access_code_mode",
+    "set_access_code_mode",
     "guest_view_entry",
     "set_guest_view_entry_enabled",
     "set_guest_view_entry_latches",
@@ -951,6 +1183,80 @@ async def test_async_access_codes_family(test_key):
 
         await client.community.access_code_logs(offset=100)
         assert _params(logs_route) == {"limit": "50", "offset": "100"}
+
+
+@respx.mock
+async def test_async_access_code_mode_family(test_key):
+    respx.get(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "per_member",
+            "flip_preview": _FLIP_PREVIEW}))
+    mode_route = respx.put(f"{PROD}/v1/community/access-codes/mode")
+    respx.get(f"{PROD}/v1/community/access-codes").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "feature_enabled": True,
+            "access_codes": [{**_ACCESS_CODE, "preamble": "ESM",
+                              "entry_code_masked": "ESM******"}]}))
+    respx.post(f"{PROD}/v1/community/access-codes").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "access_code": {
+                "code": "481502", "preamble": "ESM",
+                "entry_code": "ESM481502",
+                "directory_access_code_id": 412, "latch_ids": ["l1"]}}))
+
+    async with AsyncNimbioClient(test_key, max_retries=0) as client:
+        status = await client.community.access_code_mode()
+        assert status.mode == "per_member"
+        assert status.flip_preview.codes_to_delete == 14
+
+        # Already there: a no-op.
+        mode_route.mock(return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "per_member", "changed": False}))
+        unchanged = await client.community.set_access_code_mode("per_member")
+        assert unchanged.changed is False
+        assert _body(mode_route) == {"mode": "per_member", "confirm": False}
+
+        # The 409 is recoverable on the async client too, preview attached.
+        mode_route.mock(return_value=httpx.Response(409, json={"error": {
+            "code": "requires_confirmation", "message": "Re-send.",
+            "preview": {**_FLIP_PREVIEW, "mode": "per_member"}}}))
+        with pytest.raises(ConflictError) as e:
+            await client.community.set_access_code_mode("single_entry")
+        assert e.value.code == "requires_confirmation"
+        assert models.AccessCodeModePreview.from_dict(
+            e.value.preview).members_affected == 9
+
+        # Confirmed, live.
+        mode_route.mock(return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "single_entry", "changed": True,
+            "deleted_codes": 14, "notified_members": 9}))
+        change = await client.community.set_access_code_mode(
+            "single_entry", confirm=True)
+        assert _body(mode_route) == {"mode": "single_entry", "confirm": True}
+        assert change.changed is True and change.deleted_codes == 14
+
+        # Confirmed, test key.
+        mode_route.mock(return_value=httpx.Response(200, json={
+            "result": "simulated",
+            "would_change": {**_FLIP_PREVIEW, "mode": "per_member"}}))
+        simulated = await client.community.set_access_code_mode(
+            "single_entry", confirm=True)
+        assert simulated.simulated is True and simulated.changed is False
+        assert simulated.would_change is not None
+        assert simulated.would_change.codes_to_delete == 14
+
+        # Unknown mode.
+        mode_route.mock(return_value=httpx.Response(422, json={"error": {
+            "code": "invalid_mode", "message": "Unknown mode"}}))
+        with pytest.raises(APIError) as e2:
+            await client.community.set_access_code_mode("keypad")  # type: ignore[arg-type]
+        assert e2.value.code == "invalid_mode"
+
+        # The new fields parse on the async client too.
+        row = (await client.community.access_codes()).access_codes[0]
+        assert (row.preamble, row.entry_code_masked) == ("ESM", "ESM******")
+        created = await client.community.create_access_code("481502", ["l1"])
+        assert created.entry_code == "ESM481502"
 
 
 @respx.mock
