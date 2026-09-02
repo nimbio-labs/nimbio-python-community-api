@@ -20,6 +20,17 @@ def _d(raw: Any) -> Dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+def _int(value: Any) -> Optional[int]:
+    """An integer count, or ``None`` when the server sent something that is
+    not one — a malformed field must not take the whole response down."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # Account / auth
 # --------------------------------------------------------------------------- #
@@ -2578,30 +2589,31 @@ class AccessCodeModePreview:
 
     ``mode`` is the community's *current* mode where the server includes it
     (the 409 preview and ``would_change``); it is ``None`` on ``flip_preview``,
-    whose parent carries the current mode.
+    whose parent carries the current mode. A count the server omitted or sent
+    malformed reads ``None`` rather than raising.
     """
 
     new_mode: Optional[str] = None
-    codes_to_delete: int = 0
-    members_affected: int = 0
-    members_to_assign_preamble: int = 0
+    codes_to_delete: Optional[int] = None
+    members_affected: Optional[int] = None
+    members_to_assign_preamble: Optional[int] = None
     mode: Optional[str] = None
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
 
     @property
     def destructive(self) -> bool:
         """True when confirming would delete at least one code."""
-        return self.codes_to_delete > 0
+        return (self.codes_to_delete or 0) > 0
 
     @classmethod
     def from_dict(cls, raw: Any) -> "AccessCodeModePreview":
         d = _d(raw)
         return cls(
             new_mode=d.get("new_mode"),
-            codes_to_delete=int(d.get("codes_to_delete") or 0),
-            members_affected=int(d.get("members_affected") or 0),
-            members_to_assign_preamble=int(
-                d.get("members_to_assign_preamble") or 0),
+            codes_to_delete=_int(d.get("codes_to_delete")),
+            members_affected=_int(d.get("members_affected")),
+            members_to_assign_preamble=_int(
+                d.get("members_to_assign_preamble")),
             mode=d.get("mode"),
             raw=d,
         )
@@ -2657,8 +2669,8 @@ class AccessCodeModeChange:
 
     mode: Optional[str]
     changed: bool = False
-    deleted_codes: int = 0
-    notified_members: int = 0
+    deleted_codes: Optional[int] = None
+    notified_members: Optional[int] = None
     would_change: Optional[AccessCodeModePreview] = None
     result: Optional[str] = None
     request_id: Optional[str] = None
@@ -2675,8 +2687,8 @@ class AccessCodeModeChange:
         return cls(
             mode=d.get("mode"),
             changed=bool(d.get("changed")),
-            deleted_codes=int(d.get("deleted_codes") or 0),
-            notified_members=int(d.get("notified_members") or 0),
+            deleted_codes=_int(d.get("deleted_codes")),
+            notified_members=_int(d.get("notified_members")),
             would_change=(AccessCodeModePreview.from_dict(would)
                           if isinstance(would, dict) else None),
             result=d.get("result"),

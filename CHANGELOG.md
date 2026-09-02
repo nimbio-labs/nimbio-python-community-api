@@ -45,6 +45,15 @@ mode switch and the new per-member preamble fields.
   were read under, beside `feature_enabled`. The mode routes themselves are
   not gated on the Directory Access Codes setting.
 - `CAPABILITIES` gains `"access_code_mode"` (22 names).
+
+### Changed
+
+- `confirm=` on `set_access_code_mode()` and `update_nfc_tag()` is honoured
+  **only as the literal `True`** — a truthy string such as `"false"` or `"0"`
+  (the kind of value that leaks in from an env var or CLI flag) goes on the
+  wire as `false`, matching the server's own rule. Preview and result counts
+  (`codes_to_delete`, `deleted_codes`, ...) are `Optional[int]` and read
+  `None` when the server omits or malforms one, rather than raising.
 - `surface.json` now lists 95 operations.
 
 ## [0.6.0] - 2026-08-27

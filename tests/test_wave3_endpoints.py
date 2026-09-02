@@ -541,6 +541,40 @@ def test_set_access_code_mode_sends_confirm_as_a_real_boolean(client):
 
 
 @respx.mock
+def test_only_a_literal_true_confirms_the_flip(client):
+    """`confirm` wipes every code in the community, so a truthy-but-not-True
+    value — "false" or "0" read from an env var, a CLI flag, a JSON string, or
+    a stray 1 — must go on the wire as false, never be coerced to true."""
+    route = respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
+        return_value=httpx.Response(200, json={
+            "result": "ok", "mode": "single_entry", "changed": False}))
+
+    for not_confirm in ("true", "false", "0", "no", 1, None, [True]):
+        client.community.set_access_code_mode(
+            "single_entry", confirm=not_confirm)  # type: ignore[arg-type]
+        assert _body(route) == {"mode": "single_entry", "confirm": False}, \
+            f"{not_confirm!r} must not confirm"
+
+    client.community.set_access_code_mode("single_entry", confirm=True)
+    assert _body(route)["confirm"] is True
+
+
+@respx.mock
+def test_only_a_literal_true_confirms_an_nfc_tag_write(client):
+    """The NFC-tag write shares the handshake and the rule."""
+    route = respx.patch(f"{PROD}/v1/community/nfc-tags/4182").mock(
+        return_value=httpx.Response(200, json={"result": "ok", "tag": {}}))
+
+    for not_confirm in ("true", "false", 1):
+        client.community.update_nfc_tag(
+            4182, disabled=True, confirm=not_confirm)  # type: ignore[arg-type]
+        assert _body(route) == {"disabled": True, "confirm": False}
+
+    client.community.update_nfc_tag(4182, disabled=True, confirm=True)
+    assert _body(route) == {"disabled": True, "confirm": True}
+
+
+@respx.mock
 def test_set_access_code_mode_already_there_is_a_no_op(client):
     respx.put(f"{PROD}/v1/community/access-codes/mode").mock(
         return_value=httpx.Response(200, json={
@@ -550,7 +584,7 @@ def test_set_access_code_mode_already_there_is_a_no_op(client):
     change = client.community.set_access_code_mode("single_entry")
     assert change.changed is False
     assert change.mode == "single_entry"
-    assert change.deleted_codes == 0 and change.notified_members == 0
+    assert change.deleted_codes is None and change.notified_members is None
     assert change.would_change is None
     assert change.simulated is False
     assert change.request_id == "b1c2"
@@ -632,8 +666,10 @@ def test_set_access_code_mode_test_key_is_simulated_with_the_preview(client):
                                                    confirm=True)
     assert change.simulated is True
     assert change.changed is False
+    # Pinned: nothing moved, so there is no mode to report — both SDKs
+    # answer None/null here rather than echoing would_change.new_mode.
     assert change.mode is None, "nothing moved, so no mode to report"
-    assert change.deleted_codes == 0 and change.notified_members == 0
+    assert change.deleted_codes is None and change.notified_members is None
     assert change.would_change is not None
     assert change.would_change.mode == "per_member"
     assert change.would_change.new_mode == "single_entry"
@@ -1012,9 +1048,18 @@ def test_models_tolerate_an_empty_or_odd_payload():
     assert models.AccessCodeLogPage.from_dict({}).logs == []
     assert models.AccessCodeModeStatus.from_dict({}).mode is None
     assert models.AccessCodeModeStatus.from_dict(
-        {"flip_preview": "nope"}).flip_preview.codes_to_delete == 0
+        {"flip_preview": "nope"}).flip_preview.codes_to_delete is None
     assert models.AccessCodeModePreview.from_dict(
         {"codes_to_delete": None}).destructive is False
+    # A malformed count reads None rather than taking the response down.
+    odd = models.AccessCodeModePreview.from_dict(
+        {"codes_to_delete": "lots", "members_affected": "9",
+         "members_to_assign_preamble": True})
+    assert odd.codes_to_delete is None and odd.destructive is False
+    assert odd.members_affected == 9
+    assert odd.members_to_assign_preamble is None
+    assert models.AccessCodeModeChange.from_dict(
+        {"deleted_codes": "14x"}).deleted_codes is None
     assert models.AccessCodeModeChange.from_dict({}).changed is False
     assert models.AccessCodeModeChange.from_dict(
         {"would_change": "nope"}).would_change is None

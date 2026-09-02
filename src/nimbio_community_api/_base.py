@@ -911,9 +911,11 @@ class endpoints:
 
     @staticmethod
     def set_access_code_mode(mode: str, confirm: bool = False):
-        # The server honours only the JSON boolean `true`, so the flag is
-        # always sent as a real bool — never a string, never omitted.
-        body: dict = {"mode": str(mode), "confirm": bool(confirm)}
+        # Only the literal `True` confirms. `bool()` would turn "false", "0"
+        # or "no" — the kind of value that leaks in from an env var, a CLI
+        # flag or a JSON string — into `true`, and this flag wipes every code
+        # in the community. The server applies the same `is True` rule.
+        body: dict = {"mode": str(mode), "confirm": confirm is True}
         return ("PUT", "/v1/community/access-codes/mode", None, body,
                 _m.AccessCodeModeChange.from_dict)
 
@@ -1026,7 +1028,8 @@ class endpoints:
         if latch_id is not UNSET:
             body["latch_id"] = latch_id
         if confirm is not None:
-            body["confirm"] = bool(confirm)
+            # Same rule as set_access_code_mode: only a literal True confirms.
+            body["confirm"] = confirm is True
         return ("PATCH", f"/v1/community/nfc-tags/{_enc(tag_id)}", None, body,
                 _m.NfcTag.from_dict)
 
