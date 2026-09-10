@@ -298,6 +298,17 @@ class Member:
     the first of them when the server sends a list instead of a single value.
     A row with ``is_home`` true is a *home*, not a person: ``keys`` there lists
     the home's members' ids.
+
+    Each entry in ``keys`` is a plain dict carrying ``key_id``, ``key_name``,
+    ``disabled``, ``latches``, ``parent_key_id``, and — for a key with an end
+    date — ``expires_at`` (UTC ``"YYYY-MM-DD HH:MM:SS"``), ``expires_at_valid``
+    and ``installer_grant``. ``disabled`` means REVOKED and does not include
+    expiry, so a lapsed key still reports it falsy; read ``expires_at_valid``
+    as well for "is this key currently in force?".
+
+    ``installer_grant`` on the member itself means they are on the roster only
+    because a Nimbio installer was granted a temporary 7-day key for the gate
+    they installed. It is revocable like any other member key.
     """
 
     account_community_id: Optional[int]
@@ -311,6 +322,7 @@ class Member:
     accepted: Optional[bool] = None
     subkey_count: Optional[int] = None
     created_datetime: Optional[str] = None
+    installer_grant: bool = False
     bucket: Optional[str] = None  # single-member read only
     status: Optional[int] = None  # single-member read only
     raw: Dict[str, Any] = field(default_factory=dict, repr=False)
@@ -336,6 +348,7 @@ class Member:
             accepted=d.get("accepted"),
             subkey_count=d.get("subkey_count"),
             created_datetime=d.get("created_datetime"),
+            installer_grant=bool(d.get("installer_grant")),
             bucket=d.get("bucket"),
             status=d.get("status"),
             raw=d,
