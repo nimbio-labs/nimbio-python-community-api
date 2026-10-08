@@ -113,7 +113,8 @@ class AsyncNimbioClient(BaseClient):
     a ``304 Not Modified`` replays the body from a bounded per-client cache and
     refunds your monthly quota, transparently and without ever serving stale
     data. ``cache=False`` opts out, ``cache_size=...`` resizes, and
-    :meth:`cache_stats` reports what actually happened.
+    :meth:`cache_stats` reports what actually happened. ``integration=...``
+    identifies a product built on the SDK, as on the sync client.
     """
 
     def __init__(self, api_key: Optional[str] = None, *,
@@ -124,12 +125,13 @@ class AsyncNimbioClient(BaseClient):
                  default_headers: Optional[dict] = None,
                  cache: bool = True,
                  cache_size: int = DEFAULT_CACHE_SIZE,
+                 integration: Optional[str] = None,
                  http_client: Optional[httpx.AsyncClient] = None) -> None:
         super().__init__(
             api_key, environment=environment, base_url=base_url,
             timeout=30.0 if timeout is None else timeout,
             max_retries=max_retries, default_headers=default_headers,
-            cache=cache, cache_size=cache_size,
+            cache=cache, cache_size=cache_size, integration=integration,
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=self.timeout)

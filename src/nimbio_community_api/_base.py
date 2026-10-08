@@ -9,6 +9,7 @@ implement only the small send-loop that actually performs the HTTP round trip.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional, Tuple
 
@@ -27,6 +28,33 @@ DEFAULT_BACKOFF_BASE = 0.5  # seconds; doubles each retry
 ENV_API_KEY = "NIMBIO_API_KEY"
 ENV_ENVIRONMENT = "NIMBIO_ENV"
 ENV_BASE_URL = "NIMBIO_BASE_URL"
+
+USER_AGENT = f"nimbio-community-api-python/{__version__}"
+INTEGRATION_HEADER = "X-Nimbio-Integration"
+# "<slug>/<version>", e.g. "home_assistant/0.4.1". The slug is the open-surface
+# format from nimbioCore/shared-contracts/open-surfaces.md; the version is one
+# User-Agent product-version token, so the value can be appended to the UA.
+_INTEGRATION_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}/[A-Za-z0-9._+-]+$")
+_INTEGRATION_MAX_LEN = 80
+
+
+def _validate_integration(integration: Optional[str]) -> Optional[str]:
+    """Return ``integration`` unchanged, or raise ``ValueError`` if malformed.
+
+    A malformed value is a developer error, so it fails at construction rather
+    than being sent and silently ignored by the server.
+    """
+    if integration is None:
+        return None
+    if (not isinstance(integration, str)
+            or len(integration) > _INTEGRATION_MAX_LEN
+            or not _INTEGRATION_RE.fullmatch(integration)):
+        raise ValueError(
+            f"integration must look like '<slug>/<version>' (slug "
+            f"[a-z][a-z0-9_]{{1,31}}, at most {_INTEGRATION_MAX_LEN} "
+            f"characters), e.g. 'home_assistant/0.4.1'; got {integration!r}"
+        )
+    return integration
 
 
 class _Unset:
@@ -67,7 +95,9 @@ class BaseClient:
         default_headers: Optional[Mapping[str, str]] = None,
         cache: bool = True,
         cache_size: int = DEFAULT_CACHE_SIZE,
+        integration: Optional[str] = None,
     ) -> None:
+        self._integration = _validate_integration(integration)
         api_key = api_key or os.environ.get(ENV_API_KEY)
         if not api_key:
             raise exc.NimbioConfigError(
@@ -133,11 +163,24 @@ class BaseClient:
 
     # -- request preparation ------------------------------------------------ #
 
+    def _identity_headers(self) -> dict:
+        """User-Agent, plus the integration header when one is configured.
+
+        Unset, this is exactly the pre-``integration`` User-Agent and nothing
+        else, so older callers send byte-for-byte the same requests.
+        """
+        if self._integration is None:
+            return {"User-Agent": USER_AGENT}
+        return {
+            "User-Agent": f"{USER_AGENT} {self._integration}",
+            INTEGRATION_HEADER: self._integration,
+        }
+
     def _headers(self) -> dict:
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Accept": "application/json",
-            "User-Agent": f"nimbio-community-api-python/{__version__}",
+            **self._identity_headers(),
         }
         headers.update(self._default_headers)
         return headers
@@ -153,7 +196,7 @@ class BaseClient:
     ) -> PreparedRequest:
         headers = self._headers() if auth else {
             "Accept": "application/json",
-            "User-Agent": f"nimbio-community-api-python/{__version__}",
+            **self._identity_headers(),
         }
         if json is not None:
             headers["Content-Type"] = "application/json"

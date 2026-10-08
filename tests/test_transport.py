@@ -7,10 +7,12 @@ import respx
 from nimbio_community_api import (
     APIConnectionError,
     APITimeoutError,
+    AsyncNimbioClient,
     NimbioClient,
     UpstreamError,
 )
 from nimbio_community_api._base import BaseClient, endpoints
+from nimbio_community_api._version import __version__
 
 PROD = "https://api.nimbio.com"
 
@@ -281,3 +283,92 @@ def test_base_client_is_abstract_enough(test_key):
     assert base.base_url == "https://api.nimbio.dev"
     assert base.mode == "test"
     assert not hasattr(base, "_request")
+
+
+# -- integration ------------------------------------------------------------ #
+
+@respx.mock
+def test_integration_unset_sends_todays_headers(client):
+    route = respx.get(f"{PROD}/v1/me").mock(
+        return_value=httpx.Response(200, json={"account_id": "a1", "key": {}}))
+    client.me()
+    headers = route.calls.last.request.headers
+    assert "x-nimbio-integration" not in headers
+    assert headers["user-agent"] == (
+        f"nimbio-community-api-python/{__version__}")
+
+
+@respx.mock
+def test_integration_sent_on_authenticated_requests(test_key):
+    c = NimbioClient(test_key, max_retries=0,
+                     integration="home_assistant/0.4.1")
+    route = respx.get(f"{PROD}/v1/me").mock(
+        return_value=httpx.Response(200, json={"account_id": "a1", "key": {}}))
+    c.me()
+    headers = route.calls.last.request.headers
+    assert headers["x-nimbio-integration"] == "home_assistant/0.4.1"
+    assert headers["user-agent"] == (
+        f"nimbio-community-api-python/{__version__} home_assistant/0.4.1")
+    c.close()
+
+
+def test_integration_sent_on_unauthenticated_requests(test_key):
+    c = NimbioClient(test_key, integration="homebridge/0.2.0")
+    prepared = c._prepare("GET", "/healthz", auth=False)
+    assert "Authorization" not in prepared.headers
+    assert prepared.headers["X-Nimbio-Integration"] == "homebridge/0.2.0"
+    assert prepared.headers["User-Agent"].endswith(" homebridge/0.2.0")
+    c.close()
+
+
+def test_default_headers_override_integration(test_key):
+    c = NimbioClient(test_key, integration="mcp/0.3.0",
+                     default_headers={"X-Nimbio-Integration": "custom/1",
+                                      "User-Agent": "mine/1"})
+    headers = c._prepare("GET", "/v1/me").headers
+    assert headers["X-Nimbio-Integration"] == "custom/1"
+    assert headers["User-Agent"] == "mine/1"
+    c.close()
+
+
+@pytest.mark.parametrize("value", [
+    "google_home/1.0.0",
+    "ab/1",
+    "a" + "b" * 31 + "/2026.10.0-rc.1+build",
+])
+def test_integration_accepts_well_formed_values(test_key, value):
+    NimbioClient(test_key, integration=value).close()
+
+
+@pytest.mark.parametrize("value", [
+    "",
+    "home_assistant",           # no version
+    "home_assistant/",          # empty version
+    "Home_Assistant/1.0",       # uppercase slug
+    "1home/1.0",                # leading digit
+    "a/1.0",                    # slug too short
+    "a" * 33 + "/1",            # slug too long
+    "home-assistant/1.0",       # hyphen in slug
+    "home_assistant/1.0 extra", # whitespace
+    "home_assistant/1.0\r\nX-Evil: 1",
+    "home_assistant/1.0\n",     # trailing newline ($ alone would accept it)
+    "x" * 20 + "/" + "1" * 60,  # 81 characters
+    123,
+])
+def test_integration_rejects_malformed_values(test_key, value):
+    with pytest.raises(ValueError):
+        NimbioClient(test_key, integration=value)
+    with pytest.raises(ValueError):
+        AsyncNimbioClient(test_key, integration=value)
+
+
+@respx.mock
+async def test_async_integration_header(test_key):
+    route = respx.get(f"{PROD}/v1/me").mock(
+        return_value=httpx.Response(200, json={"account_id": "a1", "key": {}}))
+    async with AsyncNimbioClient(test_key, max_retries=0,
+                                 integration="mcp/0.3.0") as c:
+        await c.me()
+    headers = route.calls.last.request.headers
+    assert headers["x-nimbio-integration"] == "mcp/0.3.0"
+    assert headers["user-agent"].endswith(" mcp/0.3.0")

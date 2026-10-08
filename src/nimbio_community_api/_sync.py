@@ -105,6 +105,10 @@ class NimbioClient(BaseClient):
     cache without the server confirming it. Turn it off with ``cache=False``,
     resize it with ``cache_size=...``, and see :meth:`cache_stats` for whether
     it is paying off. The per-minute rate limit is charged either way.
+
+    Products built on the SDK should pass ``integration="<slug>/<version>"``
+    (e.g. ``"home_assistant/0.4.1"``): it is sent as ``X-Nimbio-Integration``
+    and appended to the User-Agent, so opens are attributed to the product.
     """
 
     def __init__(self, api_key: Optional[str] = None, *,
@@ -115,12 +119,13 @@ class NimbioClient(BaseClient):
                  default_headers: Optional[dict] = None,
                  cache: bool = True,
                  cache_size: int = DEFAULT_CACHE_SIZE,
+                 integration: Optional[str] = None,
                  http_client: Optional[httpx.Client] = None) -> None:
         super().__init__(
             api_key, environment=environment, base_url=base_url,
             timeout=30.0 if timeout is None else timeout,
             max_retries=max_retries, default_headers=default_headers,
-            cache=cache, cache_size=cache_size,
+            cache=cache, cache_size=cache_size, integration=integration,
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=self.timeout)

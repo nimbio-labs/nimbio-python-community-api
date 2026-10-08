@@ -76,6 +76,7 @@ is **arguments > environment variables > defaults**.
 | `max_retries` | — | `2` | Retries 429 + 5xx with backoff, honoring `Retry-After` |
 | `cache` | — | `True` | Conditional GETs (ETag / `If-None-Match`) — see below |
 | `cache_size` | — | `256` | Max cached responses (LRU); only relevant when `cache=True` |
+| `integration` | — | `None` | `"<slug>/<version>"` naming the product built on the SDK, e.g. `"home_assistant/0.4.1"`. Sent as `X-Nimbio-Integration` and appended to the User-Agent; a malformed value raises `ValueError` |
 
 ```python
 # Picks up NIMBIO_API_KEY and NIMBIO_ENV from the environment:

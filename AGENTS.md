@@ -65,6 +65,17 @@ Facts an agent must not get wrong:
 - Opt out with `NimbioClient(api_key, cache=False)`; resize the bounded LRU with
   `cache_size=N` (default `DEFAULT_CACHE_SIZE`, 256 entries).
 
+## Identifying an integration
+
+If you are building a product on the SDK (a plugin, an assistant tool), pass
+`NimbioClient(api_key, integration="<slug>/<version>")`, e.g.
+`"home_assistant/0.4.1"`. Every request then carries
+`X-Nimbio-Integration: home_assistant/0.4.1` and the User-Agent becomes
+`nimbio-community-api-python/<sdk> home_assistant/0.4.1`, so gate opens are
+attributed to your product. The slug is `[a-z][a-z0-9_]{1,31}` and the whole
+value at most 80 characters; anything else raises `ValueError` at
+construction. Unset, nothing extra is sent.
+
 ## The whole SDK surface (sync — drop the `with`/use `await` for async)
 
 This is every method the SDK exposes: `/v1/me`, `/healthz`, the community
