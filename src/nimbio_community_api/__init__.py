@@ -54,8 +54,10 @@ from ._exceptions import (
 from ._sync import NimbioClient
 from ._version import __version__
 from .constants import (
+    ACCOUNT_EVENT_TYPES,
     CAPABILITIES,
     CHANGE_LOG_TYPES,
+    DIRECTORY_CALL_OUTCOMES,
     GEOFENCE_MODES,
     GUEST_LINK_STATES,
     GUEST_LINK_TYPES,
@@ -81,6 +83,8 @@ __all__ = [
     "constants",
     "CAPABILITIES",
     "STREAM_EVENT_TYPES",
+    "ACCOUNT_EVENT_TYPES",
+    "DIRECTORY_CALL_OUTCOMES",
     "GUEST_LINK_TYPES",
     "GUEST_LINK_STATES",
     "GEOFENCE_MODES",

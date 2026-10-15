@@ -19,6 +19,9 @@ RECONNECT_BACKOFF_BASE = 0.5   # seconds; doubles per consecutive failure
 RECONNECT_BACKOFF_MAX = 30.0
 
 STREAM_PATH = "/v1/events/stream"
+# Account-scoped twin (account keys only): same framing, filter, resume and
+# control frames, different event vocabulary.
+ACCOUNT_STREAM_PATH = "/v1/account/events/stream"
 
 
 def stream_params(events: Any = None,

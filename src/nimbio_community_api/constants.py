@@ -30,6 +30,8 @@ __all__ = [
     "CAPABILITIES",
     "ACCOUNT_KEY_CAPABILITIES",
     "STREAM_EVENT_TYPES",
+    "ACCOUNT_EVENT_TYPES",
+    "DIRECTORY_CALL_OUTCOMES",
     "GUEST_LINK_TYPES",
     "GUEST_LINK_STATES",
     "GEOFENCE_MODES",
@@ -53,8 +55,8 @@ def __dir__() -> list:
 # --------------------------------------------------------------------------- #
 #
 # The API declares these append-only and never renamed, so a name here is safe
-# to hardcode. An account-scoped key carries only "open"; a community-scoped
-# key carries all of them.
+# to hardcode. A community-scoped key carries all of them; an account-scoped
+# key carries ACCOUNT_KEY_CAPABILITIES instead.
 
 CAPABILITIES: Tuple[str, ...] = (
     "open",
@@ -81,9 +83,12 @@ CAPABILITIES: Tuple[str, ...] = (
     "access_code_mode",
 )
 
-#: The single capability an account-scoped key has. Community-scoped keys get
-#: every entry in :data:`CAPABILITIES`.
-ACCOUNT_KEY_CAPABILITIES: Tuple[str, ...] = ("open",)
+#: The capabilities an account-scoped key can have. ``open`` is always there;
+#: ``directory_call_events`` appears only while directory call events
+#: (``account.stream_events()`` / ``account.directory_calls()``) are released
+#: for that account, so check for it rather than assuming. Community-scoped
+#: keys get every entry in :data:`CAPABILITIES` and never this one.
+ACCOUNT_KEY_CAPABILITIES: Tuple[str, ...] = ("open", "directory_call_events")
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +121,31 @@ STREAM_EVENT_TYPES: Tuple[str, ...] = (
     "member.approved",
     "member.removed",
     "directory.call",
+)
+
+#: The event types ``account.stream_events()`` yields — events about *you*
+#: rather than a community, delivered to account-scoped keys only. A separate
+#: list because it is a separate stream with a separate filter: passing one of
+#: these to the community stream's ``events=`` is a 400, and vice versa.
+#:
+#: ``directory_call.ringing`` fires when a GuestView visitor calls you (or a
+#: home you belong to); ``directory_call.ended`` follows exactly once per call.
+#: Append-only, like every list here.
+ACCOUNT_EVENT_TYPES: Tuple[str, ...] = (
+    "directory_call.ringing",
+    "directory_call.ended",
+)
+
+#: A directory call's ``outcome`` (``directory_call.ended`` and
+#: ``account.directory_calls()`` rows): ``opened`` — someone opened the gate
+#: for the caller; ``answered`` — someone picked up but did not open;
+#: ``missed`` — nobody picked up. It is the call's outcome, the same for every
+#: recipient. **Open:** a newer server may add a value, and it is passed
+#: through unchanged, so keep a fallback branch.
+DIRECTORY_CALL_OUTCOMES: Tuple[str, ...] = (
+    "opened",
+    "answered",
+    "missed",
 )
 
 

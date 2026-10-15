@@ -42,9 +42,10 @@ def test_surface_covers_the_whole_registry():
         name for name, attr in vars(endpoints).items()
         if isinstance(attr, staticmethod)
     }
-    # Every registry builder, plus the one hand-merged non-registry entry.
-    assert {e["builder"] for e in surface["endpoints"]} == builders | {"_sse.stream"}
-    assert len(surface["endpoints"]) == len(builders) + 1
+    # Every registry builder, plus the two hand-merged non-registry streams.
+    streams = {"_sse.stream", "_sse.account_stream"}
+    assert {e["builder"] for e in surface["endpoints"]} == builders | streams
+    assert len(surface["endpoints"]) == len(builders) + len(streams)
 
 
 def test_stream_path_tracks_the_sdk_constant():
@@ -57,6 +58,9 @@ def test_stream_path_tracks_the_sdk_constant():
     }
     assert by_builder["_sse.stream"] == ("GET", _sse.STREAM_PATH)
     assert by_builder["_sse.stream"][1] == "/v1/events/stream"
+    assert by_builder["_sse.account_stream"] == (
+        "GET", _sse.ACCOUNT_STREAM_PATH)
+    assert by_builder["_sse.account_stream"][1] == "/v1/account/events/stream"
 
 
 def test_path_parameters_render_as_named_placeholders():

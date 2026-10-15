@@ -49,7 +49,8 @@ def test_the_public_namespace_is_only_the_intended_names():
     """This module is browsed for a name to reference, so the typing imports it
     needs must not sit in the listing alongside the vocabularies."""
     expected = ["CAPABILITIES", "ACCOUNT_KEY_CAPABILITIES",
-                "STREAM_EVENT_TYPES", "GUEST_LINK_TYPES", "GUEST_LINK_STATES",
+                "STREAM_EVENT_TYPES", "ACCOUNT_EVENT_TYPES",
+                "DIRECTORY_CALL_OUTCOMES", "GUEST_LINK_TYPES", "GUEST_LINK_STATES",
                 "GEOFENCE_MODES", "CHANGE_LOG_TYPES", "KEY_USAGE_REPORT_TYPES",
                 "has_capability"]
     assert constants.__all__ == expected
@@ -58,16 +59,27 @@ def test_the_public_namespace_is_only_the_intended_names():
         assert hasattr(constants, name)
 
 
-def test_account_keys_only_ever_get_open():
-    assert constants.ACCOUNT_KEY_CAPABILITIES == ("open",)
-    assert set(constants.ACCOUNT_KEY_CAPABILITIES) <= set(CAPABILITIES)
+def test_account_keys_get_open_and_directory_call_events():
+    assert constants.ACCOUNT_KEY_CAPABILITIES == ("open", "directory_call_events")
+    # "open" is shared; directory_call_events is account-only.
+    assert set(constants.ACCOUNT_KEY_CAPABILITIES) & set(CAPABILITIES) == {"open"}
+
+
+def test_account_stream_vocabularies():
+    assert constants.ACCOUNT_EVENT_TYPES == (
+        "directory_call.ringing", "directory_call.ended")
+    # Separate streams, separate filters: no name belongs to both.
+    assert not set(constants.ACCOUNT_EVENT_TYPES) & set(STREAM_EVENT_TYPES)
+    assert constants.DIRECTORY_CALL_OUTCOMES == ("opened", "answered", "missed")
 
 
 @pytest.mark.parametrize("vocabulary", [CAPABILITIES, STREAM_EVENT_TYPES,
                                         GUEST_LINK_TYPES, GUEST_LINK_STATES,
                                         constants.GEOFENCE_MODES,
                                         constants.CHANGE_LOG_TYPES,
-                                        constants.KEY_USAGE_REPORT_TYPES])
+                                        constants.KEY_USAGE_REPORT_TYPES,
+                                        constants.ACCOUNT_EVENT_TYPES,
+                                        constants.DIRECTORY_CALL_OUTCOMES])
 def test_the_vocabularies_are_immutable(vocabulary):
     """Callers reference these; a caller must not be able to edit them for
     everyone else in the process."""

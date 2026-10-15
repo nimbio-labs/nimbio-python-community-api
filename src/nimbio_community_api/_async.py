@@ -40,6 +40,8 @@ from .models import (
     CommunitySettings,
     DeliveryReplay,
     DeliveryReplayBatch,
+    DirectoryCall,
+    DirectoryCallPage,
     GateStatus,
     GateStatusLogEntry,
     GateStatusLogPage,
@@ -197,6 +199,51 @@ class AsyncNimbioClient(BaseClient):
             data = self._parse(resp.status_code, payload, resp.headers)
             return parser(data) if parser else data
 
+    # -- SSE consumer (shared by community and account streams) ------------ #
+
+    async def _stream(self, path: str, events: Optional[Sequence[str]],
+                      last_event_id: Optional[str], reconnect: bool,
+                      ) -> AsyncIterator[Union[StreamEvent, StreamReset]]:
+        cursor = last_event_id
+        attempt = 0
+        while True:
+            prepared = self._prepare("GET", path,
+                                     params=_sse.stream_params(events, cursor))
+            timeout = httpx.Timeout(self.timeout or 30.0,
+                                    read=_sse.STREAM_READ_TIMEOUT)
+            try:
+                async with self._http.stream(prepared.method, prepared.url,
+                                             headers=prepared.headers,
+                                             params=prepared.params,
+                                             timeout=timeout) as resp:
+                    if resp.status_code != 200:
+                        await resp.aread()
+                        payload = self._decode(resp.status_code, resp.content,
+                                               resp.headers)
+                        self._parse(resp.status_code, payload, resp.headers)
+                    parser = _sse.SSEParser()
+                    async for line in resp.aiter_lines():
+                        frame = parser.feed(line)
+                        if frame is None:
+                            continue
+                        model = _sse.frame_to_model(frame)
+                        if model is None:
+                            continue
+                        attempt = 0
+                        cursor = None if isinstance(model, StreamReset) else model.id
+                        yield model
+            except httpx.TimeoutException as e:
+                if not reconnect:
+                    raise exc.APITimeoutError(cause=e) from e
+            except httpx.HTTPError as e:
+                if not reconnect:
+                    raise exc.APIConnectionError(str(e) or "Connection error",
+                                                 cause=e) from e
+            if not reconnect:
+                return
+            await asyncio.sleep(_sse.backoff_delay(attempt))
+            attempt += 1
+
     # -- top-level endpoints ------------------------------------------------ #
 
     async def health(self) -> Health:
@@ -232,6 +279,40 @@ class _AsyncAccount:
                    idempotency_key: Optional[str] = None) -> OpenResult:
         return await self._c._request(
             endpoints.account_open(key_id, latch_id, note, idempotency_key))
+
+    # -- directory calls ----------------------------------------------------- #
+
+    async def directory_calls(self, *, limit: int = 20,
+                              before: Optional[str] = None) -> DirectoryCallPage:
+        """GuestView calls that rang you, newest first. Semantics match
+        :meth:`NimbioClient.account.directory_calls`."""
+        return await self._c._request(
+            endpoints.account_directory_calls(limit, before))
+
+    async def iter_directory_calls(self, *, limit: int = 20,
+                                   before: Optional[str] = None,
+                                   ) -> AsyncIterator[DirectoryCall]:
+        """Yield every directory call, newest first, across all pages."""
+        while True:
+            page = await self.directory_calls(limit=limit, before=before)
+            for call in page.calls:
+                yield call
+            # A cursor that does not advance would re-yield the same page forever.
+            if (page.next_before is None or not page.calls
+                    or page.next_before == before):
+                return
+            before = page.next_before
+
+    # -- live events --------------------------------------------------------- #
+
+    def stream_events(self, *, events: Optional[Sequence[str]] = None,
+                      last_event_id: Optional[str] = None,
+                      reconnect: bool = True,
+                      ) -> AsyncIterator[Union[StreamEvent, StreamReset]]:
+        """Async-iterate your live account events (GuestView calls to you).
+        Semantics match :meth:`NimbioClient.account.stream_events`."""
+        return self._c._stream(_sse.ACCOUNT_STREAM_PATH, events, last_event_id,
+                               reconnect)
 
 
 class _AsyncCommunity:
@@ -1874,54 +1955,16 @@ class _AsyncCommunity:
 
     # -- live events --------------------------------------------------------- #
 
-    async def stream_events(self, *, events: Optional[Sequence[str]] = None,
-                            last_event_id: Optional[str] = None,
-                            reconnect: bool = True,
-                            ) -> AsyncIterator[Union[StreamEvent, StreamReset]]:
+    def stream_events(self, *, events: Optional[Sequence[str]] = None,
+                      last_event_id: Optional[str] = None,
+                      reconnect: bool = True,
+                      ) -> AsyncIterator[Union[StreamEvent, StreamReset]]:
         """Async-iterate the community's live events over SSE. Semantics match
         :meth:`NimbioClient.community.stream_events` — StreamEvent per event,
         StreamReset when a reconnect gap can't be replayed (re-seed via the
         status reads), automatic reconnect with backoff, HTTP errors raise."""
-        c = self._c
-        cursor = last_event_id
-        attempt = 0
-        while True:
-            prepared = c._prepare("GET", _sse.STREAM_PATH,
-                                  params=_sse.stream_params(events, cursor))
-            timeout = httpx.Timeout(c.timeout or 30.0,
-                                    read=_sse.STREAM_READ_TIMEOUT)
-            try:
-                async with c._http.stream(prepared.method, prepared.url,
-                                          headers=prepared.headers,
-                                          params=prepared.params,
-                                          timeout=timeout) as resp:
-                    if resp.status_code != 200:
-                        await resp.aread()
-                        payload = c._decode(resp.status_code, resp.content,
-                                            resp.headers)
-                        c._parse(resp.status_code, payload, resp.headers)
-                    parser = _sse.SSEParser()
-                    async for line in resp.aiter_lines():
-                        frame = parser.feed(line)
-                        if frame is None:
-                            continue
-                        model = _sse.frame_to_model(frame)
-                        if model is None:
-                            continue
-                        attempt = 0
-                        cursor = None if isinstance(model, StreamReset) else model.id
-                        yield model
-            except httpx.TimeoutException as e:
-                if not reconnect:
-                    raise exc.APITimeoutError(cause=e) from e
-            except httpx.HTTPError as e:
-                if not reconnect:
-                    raise exc.APIConnectionError(str(e) or "Connection error",
-                                                 cause=e) from e
-            if not reconnect:
-                return
-            await asyncio.sleep(_sse.backoff_delay(attempt))
-            attempt += 1
+        return self._c._stream(_sse.STREAM_PATH, events, last_event_id,
+                               reconnect)
 
     # -- logs --------------------------------------------------------------- #
 

@@ -10,6 +10,16 @@
     },
     {
       "method": "GET",
+      "path": "/v1/account/directory-calls",
+      "builder": "account_directory_calls"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/account/events/stream",
+      "builder": "_sse.account_stream"
+    },
+    {
+      "method": "GET",
       "path": "/v1/account/keys",
       "builder": "account_keys"
     },

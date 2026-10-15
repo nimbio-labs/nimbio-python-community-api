@@ -12,6 +12,21 @@ adheres to [Semantic Versioning](https://semver.org/).
   the User-Agent on every request, so gate opens are attributed to the
   product built on the SDK. Malformed values raise `ValueError`; unset, the
   requests are unchanged.
+- **GuestView call events for account keys.**
+  `account.stream_events(*, events=None, last_event_id=None, reconnect=True)`
+  streams `GET /v1/account/events/stream` (`directory_call.ringing`,
+  `directory_call.ended`) with the same SSE resume, reconnect and
+  `StreamReset` handling as `community.stream_events()` — both now share one
+  consumer. `account.directory_calls(*, limit=20, before=None)` →
+  `DirectoryCallPage` reads `GET /v1/account/directory-calls`, and
+  `account.iter_directory_calls()` walks its `next_before` cursor. New models
+  `DirectoryCallRinging` / `DirectoryCallEnded` (both with `from_event()`),
+  `DirectoryCall`, `DirectoryCallCaller` (nullable; either name may be None),
+  `DirectoryCallCommunity`, `DirectoryCallLatch`, `DirectoryCallCalled`.
+  `outcome`, `ended_by` and `state` are open strings. New constants
+  `ACCOUNT_EVENT_TYPES` and `DIRECTORY_CALL_OUTCOMES`; capability
+  `directory_call_events` added to `ACCOUNT_KEY_CAPABILITIES`. Errors: 403 `not_account_key`, 404
+  `feature_not_enabled` until released for the account, 429 `stream_limit`.
 
 ## [0.7.0] - 2026-09-01
 

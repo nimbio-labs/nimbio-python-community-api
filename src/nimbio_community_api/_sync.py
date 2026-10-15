@@ -32,6 +32,8 @@ from .models import (
     CommunitySettings,
     DeliveryReplay,
     DeliveryReplayBatch,
+    DirectoryCall,
+    DirectoryCallPage,
     GateStatus,
     GateStatusLogEntry,
     GateStatusLogPage,
@@ -191,6 +193,53 @@ class NimbioClient(BaseClient):
             data = self._parse(resp.status_code, payload, resp.headers)
             return parser(data) if parser else data
 
+    # -- SSE consumer (shared by community and account streams) ------------ #
+
+    def _stream(self, path: str, events: Optional[Sequence[str]],
+                last_event_id: Optional[str], reconnect: bool,
+                ) -> Iterator[Union[StreamEvent, StreamReset]]:
+        cursor = last_event_id
+        attempt = 0
+        while True:
+            prepared = self._prepare("GET", path,
+                                     params=_sse.stream_params(events, cursor))
+            timeout = httpx.Timeout(self.timeout or 30.0,
+                                    read=_sse.STREAM_READ_TIMEOUT)
+            try:
+                with self._http.stream(prepared.method, prepared.url,
+                                       headers=prepared.headers,
+                                       params=prepared.params,
+                                       timeout=timeout) as resp:
+                    if resp.status_code != 200:
+                        resp.read()
+                        payload = self._decode(resp.status_code, resp.content,
+                                               resp.headers)
+                        self._parse(resp.status_code, payload, resp.headers)
+                    parser = _sse.SSEParser()
+                    for line in resp.iter_lines():
+                        frame = parser.feed(line)
+                        if frame is None:
+                            continue
+                        model = _sse.frame_to_model(frame)
+                        if model is None:
+                            continue
+                        attempt = 0
+                        cursor = None if isinstance(model, StreamReset) else model.id
+                        yield model
+            except httpx.TimeoutException as e:
+                if not reconnect:
+                    raise exc.APITimeoutError(cause=e) from e
+            except httpx.HTTPError as e:
+                if not reconnect:
+                    raise exc.APIConnectionError(str(e) or "Connection error",
+                                                 cause=e) from e
+            # Stream ended (server close / deploy / slow-client drop) or a
+            # transport error with reconnect enabled: back off and resume.
+            if not reconnect:
+                return
+            time.sleep(_sse.backoff_delay(attempt))
+            attempt += 1
+
     # -- top-level endpoints ------------------------------------------------ #
 
     def health(self) -> Health:
@@ -234,6 +283,60 @@ class _SyncAccount:
         non-confirming gate raises :class:`GateNotOpenedError`."""
         return self._c._request(
             endpoints.account_open(key_id, latch_id, note, idempotency_key))
+
+    # -- directory calls ----------------------------------------------------- #
+
+    def directory_calls(self, *, limit: int = 20,
+                        before: Optional[str] = None) -> DirectoryCallPage:
+        """GuestView calls that rang you, newest first (``limit`` 1-100).
+
+        Pass a page's ``next_before`` back as ``before`` for the next, older
+        page, or use :meth:`iter_directory_calls`. Raises
+        :class:`NotFoundError` (``feature_not_enabled``) while directory call
+        events are not released for your account — check
+        ``me().key.has_capability("directory_call_events")`` first."""
+        return self._c._request(endpoints.account_directory_calls(limit, before))
+
+    def iter_directory_calls(self, *, limit: int = 20,
+                             before: Optional[str] = None,
+                             ) -> Iterator[DirectoryCall]:
+        """Yield every directory call, newest first, walking the
+        ``next_before`` cursor until it runs out. ``limit`` is the page size."""
+        while True:
+            page = self.directory_calls(limit=limit, before=before)
+            yield from page.calls
+            # A cursor that does not advance would re-yield the same page forever.
+            if (page.next_before is None or not page.calls
+                    or page.next_before == before):
+                return
+            before = page.next_before
+
+    # -- live events --------------------------------------------------------- #
+
+    def stream_events(self, *, events: Optional[Sequence[str]] = None,
+                      last_event_id: Optional[str] = None,
+                      reconnect: bool = True,
+                      ) -> Iterator[Union[StreamEvent, StreamReset]]:
+        """Iterate *your* live account events over SSE — today, GuestView
+        calls to you (``directory_call.ringing`` / ``directory_call.ended``;
+        see :data:`constants.ACCOUNT_EVENT_TYPES`).
+
+        Same behaviour as :meth:`community.stream_events`: ``events`` filters
+        by type (an unknown type raises :class:`BadRequestError`),
+        ``last_event_id`` resumes, dropped connections reconnect with backoff
+        when ``reconnect=True``, and a
+        :class:`~nimbio_community_api.models.StreamReset` means a gap could
+        not be replayed — catch up with :meth:`directory_calls`. Parse events
+        with ``DirectoryCallRinging.from_event(evt)`` /
+        ``DirectoryCallEnded.from_event(evt)``.
+
+        HTTP errors always raise: a community key gets
+        :class:`PermissionDeniedError` (``not_account_key``), an account the
+        feature is not released for gets :class:`NotFoundError`
+        (``feature_not_enabled``), and a fourth concurrent stream gets
+        :class:`RateLimitError` (``stream_limit``)."""
+        return self._c._stream(_sse.ACCOUNT_STREAM_PATH, events, last_event_id,
+                               reconnect)
 
 
 class _SyncCommunity:
@@ -1913,48 +2016,8 @@ class _SyncCommunity:
         one per-minute request and is monthly-quota-exempt; delivered events
         are free.
         """
-        c = self._c
-        cursor = last_event_id
-        attempt = 0
-        while True:
-            prepared = c._prepare("GET", _sse.STREAM_PATH,
-                                  params=_sse.stream_params(events, cursor))
-            timeout = httpx.Timeout(c.timeout or 30.0,
-                                    read=_sse.STREAM_READ_TIMEOUT)
-            try:
-                with c._http.stream(prepared.method, prepared.url,
-                                    headers=prepared.headers,
-                                    params=prepared.params,
-                                    timeout=timeout) as resp:
-                    if resp.status_code != 200:
-                        resp.read()
-                        payload = c._decode(resp.status_code, resp.content,
-                                            resp.headers)
-                        c._parse(resp.status_code, payload, resp.headers)
-                    parser = _sse.SSEParser()
-                    for line in resp.iter_lines():
-                        frame = parser.feed(line)
-                        if frame is None:
-                            continue
-                        model = _sse.frame_to_model(frame)
-                        if model is None:
-                            continue
-                        attempt = 0
-                        cursor = None if isinstance(model, StreamReset) else model.id
-                        yield model
-            except httpx.TimeoutException as e:
-                if not reconnect:
-                    raise exc.APITimeoutError(cause=e) from e
-            except httpx.HTTPError as e:
-                if not reconnect:
-                    raise exc.APIConnectionError(str(e) or "Connection error",
-                                                 cause=e) from e
-            # Stream ended (server close / deploy / slow-client drop) or a
-            # transport error with reconnect enabled: back off and resume.
-            if not reconnect:
-                return
-            time.sleep(_sse.backoff_delay(attempt))
-            attempt += 1
+        return self._c._stream(_sse.STREAM_PATH, events, last_event_id,
+                               reconnect)
 
     # -- logs --------------------------------------------------------------- #
 

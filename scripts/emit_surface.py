@@ -119,12 +119,22 @@ def _stream_endpoint() -> Dict[str, str]:
     return {"method": "GET", "path": _sse.STREAM_PATH, "builder": "_sse.stream"}
 
 
+def _account_stream_endpoint() -> Dict[str, str]:
+    """The account-scoped SSE stream — outside the registry for the same
+    reason as :func:`_stream_endpoint`."""
+    from nimbio_community_api import _sse
+
+    return {"method": "GET", "path": _sse.ACCOUNT_STREAM_PATH,
+            "builder": "_sse.account_stream"}
+
+
 def build_surface() -> Dict[str, Any]:
     """The full surface document, ready to serialize."""
     from nimbio_community_api._version import __version__
 
     endpoints = [_endpoint(name, func) for name, func in _builders()]
     endpoints.append(_stream_endpoint())
+    endpoints.append(_account_stream_endpoint())
     endpoints.sort(key=lambda e: (e["path"], e["method"]))
     return {
         "sdk": "python",

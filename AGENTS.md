@@ -86,7 +86,8 @@ member-open notification settings, guest access — guest links, access codes,
 GuestView Entry and short codes — NFC tags, sense lines, the map and its
 geofences, logs incl. the configuration change log and key-usage report, and the
 live event stream), and the account surface
-(`client.account.keys()` / `.open()`, added 0.2.0). **All 93 documented API
+(`client.account.keys()` / `.open()`, added 0.2.0; GuestView call events
+`client.account.stream_events()` / `.directory_calls()`, unreleased). **All 97 documented API
 operations are wrapped.** Only the service's hidden `/v1/keys*` / `/v1/calls*`
 endpoints stay unwrapped — call those over plain HTTPS if you need them.
 
@@ -258,6 +259,19 @@ with NimbioClient("nimbio_test_...") as client:
             ...  # gap not replayable: re-seed via gate_status()/hold_opens()
         else:
             ev.id, ev.type, ev.payload   # payload = event-specific fields
+
+    # Account key only: GuestView calls to YOU (404 feature_not_enabled
+    # until released for the account; 403 not_account_key on a community key)
+    for ev in client.account.stream_events():   # same reconnect/resume/reset
+        if isinstance(ev, models.StreamReset):
+            ...  # gap not replayable: catch up via account.directory_calls()
+        elif ev.type == "directory_call.ringing":
+            call = models.DirectoryCallRinging.from_event(ev)
+            call.caller            # None = anonymous guest; names may be None
+        elif ev.type == "directory_call.ended":
+            models.DirectoryCallEnded.from_event(ev).outcome  # OPEN set
+    client.account.directory_calls(limit=20, before=None)  # -> DirectoryCallPage
+    for call in client.account.iter_directory_calls(): ...  # walks next_before
 ```
 
 `stream_events()` blocks forever by default (auto-reconnect with backoff,
@@ -609,7 +623,8 @@ except ConflictError as e:
 
 ```python
 from nimbio_community_api import (
-    CAPABILITIES, STREAM_EVENT_TYPES, GUEST_LINK_TYPES, GUEST_LINK_STATES,
+    CAPABILITIES, STREAM_EVENT_TYPES, ACCOUNT_EVENT_TYPES,
+    DIRECTORY_CALL_OUTCOMES, GUEST_LINK_TYPES, GUEST_LINK_STATES,
     GEOFENCE_MODES, CHANGE_LOG_TYPES, KEY_USAGE_REPORT_TYPES, has_capability)
 
 client.me().key.has_capability("hold_opens")     # or has_capability(caps, "...")
@@ -620,7 +635,13 @@ client.me().key.has_capability("hold_opens")     # or has_capability(caps, "..."
 `access_logs`, `key_schedules`, `key_usage`, `change_logs`, `homes`,
 `short_codes`, `guest_view_entry`, `access_codes`, `guest_links`, `map`,
 `open_notifications`, `settings`, `sense_lines`, `nfc_tags`,
-`access_code_mode`). An account-scoped key has only `open`.
+`access_code_mode`). An account-scoped key has `ACCOUNT_KEY_CAPABILITIES`:
+`open`, plus `directory_call_events` while GuestView call events are released
+for its account.
+
+`ACCOUNT_EVENT_TYPES` — `directory_call.ringing`, `directory_call.ended`:
+the separate account stream's vocabulary. `DIRECTORY_CALL_OUTCOMES` —
+`opened`, `answered`, `missed`; **open**, so always keep a fallback branch.
 
 `STREAM_EVENT_TYPES` — the ten event types Nimbio delivers. There is **one**
 event vocabulary, not two: a webhook subscribes to names from this same list,
@@ -641,7 +662,7 @@ a loud 422.
 `KEY_USAGE_REPORT_TYPES` — `("commercial", "residential")`. **Not an argument**:
 the server picks it, and it decides what each `key_usage()` row's `user` means.
 
-All seven constants are **open sets** and a convenience snapshot only — the
+All nine constants are **open sets** and a convenience snapshot only — the
 server may add to any of them, nothing in this SDK rejects a name it does not
 recognise, and `webhook_event_types()` is the authoritative runtime catalog.
 

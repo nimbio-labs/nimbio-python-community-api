@@ -371,6 +371,14 @@ class endpoints:
                 None, body, _m.OpenResult.from_dict)
 
     @staticmethod
+    def account_directory_calls(limit: int = 20, before: Optional[str] = None):
+        params: dict = {"limit": limit}
+        if before is not None:
+            params["before"] = before
+        return ("GET", "/v1/account/directory-calls", params, None,
+                _m.DirectoryCallPage.from_dict)
+
+    @staticmethod
     def info():
         return "GET", "/v1/community", None, None, _m.CommunityInfo.from_dict
 

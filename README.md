@@ -8,7 +8,7 @@ GuestView Entry, short codes), manage NFC tags, diagnose the sense lines behind
 gate status, configure gate geofences, send community messages, and pull access,
 change and key-usage logs — from sync **or** async Python, with full type hints.
 
-It wraps **every one of the API's 93 documented operations**.
+It wraps **every one of the API's 97 documented operations**.
 
 ```bash
 pip install nimbio-community-api
@@ -165,6 +165,50 @@ stats = client.cache_stats()                    # .hits / .misses / .entries
 | `client.health()` | `Health` | Backend reachability (unauthenticated; never raises on 503) |
 | `client.mode` | `"test"`/`"live"`/`None` | Key mode, derived locally |
 | `client.close()` / `await client.aclose()` | — | Close the underlying HTTP client |
+
+### `client.account` — your keys and GuestView calls
+
+These need an **account-scoped** key (a community key raises
+`PermissionDeniedError`, code `not_account_key`).
+
+| Method | Returns | Description |
+|---|---|---|
+| `keys(*, include_hidden=False)` | `list[AccountKey]` | Your keys, latches nested |
+| `open(key_id, latch_id, *, note=None, idempotency_key=None)` | `OpenResult` | Open one of your gates |
+| `stream_events(*, events=None, last_event_id=None, reconnect=True)` | iterator of `StreamEvent` / `StreamReset` | Live events about *you*: `directory_call.ringing`, `directory_call.ended` |
+| `directory_calls(*, limit=20, before=None)` | `DirectoryCallPage` | GuestView calls that rang you, newest first; pass `.next_before` back as `before` |
+| `iter_directory_calls(*, limit=20, before=None)` | iterator of `DirectoryCall` | Walks every page |
+
+Directory call events reach an account only once the feature is released for
+it: until then both calls raise `NotFoundError` (`feature_not_enabled`), and
+`client.me().key.has_capability("directory_call_events")` is False.
+
+Ring a doorbell in your script when someone calls you from GuestView:
+
+```python
+from nimbio_community_api import NimbioClient
+from nimbio_community_api.models import (
+    DirectoryCallEnded, DirectoryCallRinging, StreamReset)
+
+with NimbioClient("nimbio_live_...") as client:   # an account key
+    for evt in client.account.stream_events():
+        if isinstance(evt, StreamReset):
+            continue  # missed a gap; client.account.directory_calls() has it
+        if evt.type == "directory_call.ringing":
+            call = DirectoryCallRinging.from_event(evt)
+            who = (call.caller and call.caller.display_name) or "A visitor"
+            gate = call.latch.name if call.latch else call.community.name
+            ring_doorbell(f"{who} is calling from {gate}")
+        elif evt.type == "directory_call.ended":
+            ended = DirectoryCallEnded.from_event(evt)
+            stop_ringing(ended.directory_call_id, ended.outcome)
+```
+
+`caller` is None for an anonymous guest; a signed-in caller may still have
+either name missing. `outcome` (`opened`, `answered`, `missed`) is open — a
+newer server may add a value, so keep a fallback branch. Answering still
+happens in the Nimbio app; the stream only tells you the phone is ringing.
+The stream reconnects and resumes exactly like `community.stream_events()`.
 
 ### `client.community` — reads
 
@@ -1044,7 +1088,8 @@ silent `False` rather than an error — so the names ship with the package:
 
 ```python
 from nimbio_community_api import (
-    CAPABILITIES, STREAM_EVENT_TYPES, GUEST_LINK_TYPES, GUEST_LINK_STATES,
+    CAPABILITIES, STREAM_EVENT_TYPES, ACCOUNT_EVENT_TYPES,
+    DIRECTORY_CALL_OUTCOMES, GUEST_LINK_TYPES, GUEST_LINK_STATES,
     GEOFENCE_MODES, CHANGE_LOG_TYPES, KEY_USAGE_REPORT_TYPES)
 
 key = client.me().key
@@ -1052,12 +1097,16 @@ if key.has_capability("hold_opens"):        # or has_capability(key.capabilities
     ...
 ```
 
-`CAPABILITIES` is the 21 capabilities a community-scoped key carries
-(`constants.ACCOUNT_KEY_CAPABILITIES` is the one an account-scoped key gets).
+`CAPABILITIES` is the 22 capabilities a community-scoped key carries. An
+account-scoped key has `constants.ACCOUNT_KEY_CAPABILITIES` instead — `open`,
+plus `directory_call_events` once GuestView call events are released for the
+account.
 
 `STREAM_EVENT_TYPES` is the ten event types Nimbio delivers — there is one
 event vocabulary, not two: a webhook subscribes to names from this same list,
-and `stream_events()` yields them as `.type`.
+and `stream_events()` yields them as `.type`. `ACCOUNT_EVENT_TYPES` is
+the separate account stream's (`account.stream_events()`), and
+`DIRECTORY_CALL_OUTCOMES` the values a directory call's `outcome` can take.
 
 `GUEST_LINK_TYPES` is `("event", "limited_use")` — a typo there is loud (422),
 so it is for autocomplete. `GUEST_LINK_STATES` is the six values a guest link's
@@ -1071,7 +1120,7 @@ typo is a loud 422. `KEY_USAGE_REPORT_TYPES` is `("commercial", "residential")`,
 and that one is not an argument at all: **the server chooses it**, and it
 decides what each `key_usage()` row's `user` means.
 
-All seven are **open sets**: the server may add to any of them at any time, and
+All nine are **open sets**: the server may add to any of them at any time, and
 nothing here rejects a name it does not recognise. The constants are a
 convenience snapshot for autocomplete and typo-avoidance, not the source of
 truth — for the live catalog from the server, call `webhook_event_types()`.

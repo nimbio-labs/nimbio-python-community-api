@@ -58,8 +58,9 @@ class ApiKeyInfo:
 
         Pass a name from :data:`nimbio_community_api.constants.CAPABILITIES`
         rather than a literal — a typo is a False that never explains itself.
-        An account-scoped key has only ``"open"``; a community-scoped key has
-        every capability.
+        An account-scoped key has ``"open"``, plus ``"directory_call_events"``
+        while that feature is released for its account; a community-scoped key
+        has every capability in :data:`~nimbio_community_api.constants.CAPABILITIES`.
         """
         from .constants import has_capability as _has
 
@@ -1449,7 +1450,10 @@ class StreamEvent:
 
     ``data`` is the exact JSON body a webhook receiver gets for the same
     event: ``{"event", "id", "community_id", "occurred_at", "data": {...}}``
-    — the event-specific fields live under ``data["data"]``.
+    — the event-specific fields live under ``data["data"]``. Events from
+    ``account.stream_events()`` carry ``account_id`` in place of
+    ``community_id``; parse those with :meth:`DirectoryCallRinging.from_event`
+    / :meth:`DirectoryCallEnded.from_event`.
     """
 
     id: str
@@ -1468,10 +1472,286 @@ class StreamReset:
     """Marker yielded when the server cannot replay the requested cursor.
 
     The client's local picture may be stale: re-seed state via the status
-    reads (``gate_status()`` / ``hold_opens()``), then keep iterating.
+    reads (``gate_status()`` / ``hold_opens()``, or
+    ``account.directory_calls()`` on the account stream), then keep iterating.
     """
 
     reason: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- #
+# Directory calls (account events)
+# --------------------------------------------------------------------------- #
+#
+# A GuestView visitor calling *you*. Delivered live on the account stream
+# (``account.stream_events()``) as ``directory_call.ringing`` and
+# ``directory_call.ended``, and kept as history behind
+# ``account.directory_calls()``. Every string vocabulary here is open: an
+# unrecognised ``outcome`` or ``ended_by`` is carried through as-is, never
+# rejected — compare against :data:`constants.DIRECTORY_CALL_OUTCOMES`.
+
+@dataclass
+class DirectoryCallCommunity:
+    """The community the call was placed at."""
+
+    id: Optional[int]
+    name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallCommunity":
+        d = _d(raw)
+        return cls(id=_int(d.get("id")), name=d.get("name"), raw=d)
+
+
+@dataclass
+class DirectoryCallLatch:
+    """The gate the visitor is standing at."""
+
+    id: Optional[str]
+    name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallLatch":
+        d = _d(raw)
+        return cls(id=d.get("id"), name=d.get("name"), raw=d)
+
+
+@dataclass
+class DirectoryCallCalled:
+    """Who the visitor called: you directly (``type == "member"``) or a home
+    you belong to (``type == "home"``, with ``home_id``/``home_name`` set) —
+    a home call rings every member of that home."""
+
+    type: Optional[str]  # "member" | "home"
+    home_id: Optional[str]
+    home_name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallCalled":
+        d = _d(raw)
+        return cls(type=d.get("type"), home_id=d.get("home_id"),
+                   home_name=d.get("home_name"), raw=d)
+
+
+@dataclass
+class DirectoryCallCaller:
+    """A caller who was signed in to Nimbio when they called.
+
+    Anonymous guests have no caller object at all (the parent's ``caller`` is
+    None). Either name may still be None for a signed-in caller who never set
+    one. The caller's account id is never disclosed.
+    """
+
+    signed_in: bool
+    first_name: Optional[str]
+    last_name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def display_name(self) -> Optional[str]:
+        """``"First Last"`` from whichever parts are present, else None."""
+        name = " ".join(p for p in (self.first_name, self.last_name) if p)
+        return name or None
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallCaller":
+        d = _d(raw)
+        return cls(signed_in=bool(d.get("signed_in")),
+                   first_name=d.get("first_name"),
+                   last_name=d.get("last_name"), raw=d)
+
+
+def _caller(value: Any) -> Optional[DirectoryCallCaller]:
+    return DirectoryCallCaller.from_dict(value) if isinstance(value, dict) else None
+
+
+def _event_payload(event: Any) -> Dict[str, Any]:
+    """The per-event fields of a :class:`StreamEvent`, or a dict as given."""
+    if isinstance(event, StreamEvent):
+        return event.payload
+    return _d(event)
+
+
+@dataclass
+class DirectoryCallRinging:
+    """``directory_call.ringing`` — a visitor is calling you right now.
+
+    Build one from a stream event with :meth:`from_event`. You have until
+    ``answer_window_ends_at`` (nine minutes after ``placed_at``) to answer in
+    the Nimbio app; exactly one ``directory_call.ended`` follows for the same
+    ``directory_call_id``.
+    """
+
+    directory_call_id: Optional[str]
+    placed_at: Optional[str]
+    answer_window_ends_at: Optional[str]
+    community: DirectoryCallCommunity
+    latch: Optional[DirectoryCallLatch]  # None when the call has no gate
+    called: DirectoryCallCalled
+    arrived_via: Optional[str]  # "nfc" | "link"
+    caller: Optional[DirectoryCallCaller]  # None for an anonymous guest
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_event(cls, event: Any) -> "DirectoryCallRinging":
+        """Parse a ``directory_call.ringing`` :class:`StreamEvent` (or its
+        ``payload`` dict)."""
+        return cls.from_dict(_event_payload(event))
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallRinging":
+        d = _d(raw)
+        latch = d.get("latch")
+        return cls(
+            directory_call_id=d.get("directory_call_id"),
+            placed_at=d.get("placed_at"),
+            answer_window_ends_at=d.get("answer_window_ends_at"),
+            community=DirectoryCallCommunity.from_dict(d.get("community")),
+            latch=(DirectoryCallLatch.from_dict(latch)
+                   if isinstance(latch, dict) else None),
+            called=DirectoryCallCalled.from_dict(d.get("called")),
+            arrived_via=d.get("arrived_via"),
+            caller=_caller(d.get("caller")),
+            raw=d,
+        )
+
+
+@dataclass
+class DirectoryCallEnded:
+    """``directory_call.ended`` — sent exactly once per call when it ends.
+
+    ``outcome`` is the **call's** outcome, the same for everyone it rang
+    (``opened``, ``answered`` or ``missed``) and an open vocabulary: a newer
+    server may send a value this release does not know, which is passed
+    through unchanged. Your own part is in the ``*_by_you`` flags — declining
+    does not end the call for anyone else, so ``declined_by_you`` can be True
+    while ``outcome`` is ``opened``.
+    """
+
+    directory_call_id: Optional[str]
+    outcome: Optional[str]  # open set: "opened" | "answered" | "missed" | ...
+    ended_at: Optional[str]
+    ended_by: Optional[str]  # open set: "caller" | "callee" | "timeout" | ...
+    answered_at: Optional[str]
+    answered_by_you: bool
+    answered_by_first_name: Optional[str]
+    declined_by_you: bool
+    opened_by_you: bool
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_event(cls, event: Any) -> "DirectoryCallEnded":
+        """Parse a ``directory_call.ended`` :class:`StreamEvent` (or its
+        ``payload`` dict)."""
+        return cls.from_dict(_event_payload(event))
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallEnded":
+        d = _d(raw)
+        return cls(
+            directory_call_id=d.get("directory_call_id"),
+            outcome=d.get("outcome"),
+            ended_at=d.get("ended_at"),
+            ended_by=d.get("ended_by"),
+            answered_at=d.get("answered_at"),
+            answered_by_you=bool(d.get("answered_by_you")),
+            answered_by_first_name=d.get("answered_by_first_name"),
+            declined_by_you=bool(d.get("declined_by_you")),
+            opened_by_you=bool(d.get("opened_by_you")),
+            raw=d,
+        )
+
+
+@dataclass
+class DirectoryCall:
+    """One row of :meth:`account.directory_calls` — a call that rang you.
+
+    Carries every ``directory_call.ringing`` field plus where the call got
+    to. ``state`` is ``ringing``, ``answered`` or ``ended``; ``outcome`` and
+    the ``ended_*`` fields are None while the call is still live. Both
+    ``state`` and ``outcome`` are open vocabularies.
+    """
+
+    directory_call_id: Optional[str]
+    placed_at: Optional[str]
+    answer_window_ends_at: Optional[str]
+    community: DirectoryCallCommunity
+    latch: Optional[DirectoryCallLatch]
+    called: DirectoryCallCalled
+    arrived_via: Optional[str]
+    caller: Optional[DirectoryCallCaller]
+    state: Optional[str]  # open set: "ringing" | "answered" | "ended" | ...
+    outcome: Optional[str]  # open set; None while live
+    ended_at: Optional[str]
+    ended_by: Optional[str]
+    answered_at: Optional[str]
+    answered_by_you: bool
+    answered_by_first_name: Optional[str]
+    declined_by_you: bool
+    opened_by_you: bool
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCall":
+        d = _d(raw)
+        ringing = DirectoryCallRinging.from_dict(d)
+        ended = DirectoryCallEnded.from_dict(d)
+        return cls(
+            directory_call_id=ringing.directory_call_id,
+            placed_at=ringing.placed_at,
+            answer_window_ends_at=ringing.answer_window_ends_at,
+            community=ringing.community,
+            latch=ringing.latch,
+            called=ringing.called,
+            arrived_via=ringing.arrived_via,
+            caller=ringing.caller,
+            state=d.get("state"),
+            outcome=ended.outcome,
+            ended_at=ended.ended_at,
+            ended_by=ended.ended_by,
+            answered_at=ended.answered_at,
+            answered_by_you=ended.answered_by_you,
+            answered_by_first_name=ended.answered_by_first_name,
+            declined_by_you=ended.declined_by_you,
+            opened_by_you=ended.opened_by_you,
+            raw=d,
+        )
+
+
+@dataclass
+class DirectoryCallPage:
+    """Result of :meth:`account.directory_calls` — newest first.
+
+    Pass ``next_before`` back as ``before=`` for the next (older) page; it is
+    None on the last page. Or let :meth:`account.iter_directory_calls` walk
+    the pages for you.
+    """
+
+    calls: List[DirectoryCall]
+    next_before: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def has_more(self) -> bool:
+        return self.next_before is not None
+
+    def __iter__(self):
+        return iter(self.calls)
+
+    def __len__(self) -> int:
+        return len(self.calls)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "DirectoryCallPage":
+        d = _d(raw)
+        return cls(
+            calls=[DirectoryCall.from_dict(x) for x in (d.get("calls") or [])],
+            next_before=d.get("next_before") or None,
+            raw=d,
+        )
 
 
 # --------------------------------------------------------------------------- #
