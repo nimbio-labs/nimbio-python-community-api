@@ -8,7 +8,7 @@ GuestView Entry, short codes), manage NFC tags, diagnose the sense lines behind
 gate status, configure gate geofences, send community messages, and pull access,
 change and key-usage logs — from sync **or** async Python, with full type hints.
 
-It wraps **every one of the API's 97 documented operations**.
+It wraps **every one of the API's 98 documented operations**.
 
 ```bash
 pip install nimbio-community-api
@@ -166,7 +166,7 @@ stats = client.cache_stats()                    # .hits / .misses / .entries
 | `client.mode` | `"test"`/`"live"`/`None` | Key mode, derived locally |
 | `client.close()` / `await client.aclose()` | — | Close the underlying HTTP client |
 
-### `client.account` — your keys and GuestView calls
+### `client.account` — your keys, open history and GuestView calls
 
 These need an **account-scoped** key (a community key raises
 `PermissionDeniedError`, code `not_account_key`).
@@ -178,6 +178,28 @@ These need an **account-scoped** key (a community key raises
 | `stream_events(*, events=None, last_event_id=None, reconnect=True)` | iterator of `StreamEvent` / `StreamReset` | Live events about *you*: `directory_call.ringing`, `directory_call.ended` |
 | `directory_calls(*, limit=20, before=None)` | `DirectoryCallPage` | GuestView calls that rang you, newest first; pass `.next_before` back as `before` |
 | `iter_directory_calls(*, limit=20, before=None)` | iterator of `DirectoryCall` | Walks every page |
+| `history(*, date_from=None, date_to=None, key_id=None, page=0)` | `OpenHistoryPage` | Opens on your keys (including keys you shared), newest first, 1000 per page |
+| `iter_history(*, date_from=None, date_to=None, key_id=None, start_page=0)` | iterator of `AccountOpen` | Walks every page of the window |
+
+Your open history is the app's History tab: every open on a key you own,
+including opens on keys you shared with someone else, filed under *your* key.
+`date_from`/`date_to` take a date or an ISO-8601 datetime; omit both for the
+last 90 days (the retention floor). `opened_by.is_you` says whether you opened;
+otherwise `opened_by.name` is who did, and `guest_link` is set for a guest-link
+open. `open_type` and `result` are open vocabularies (`OPEN_HISTORY_TYPES` /
+`OPEN_HISTORY_RESULTS` list the known names).
+
+```python
+with NimbioClient("nimbio_live_...") as client:   # an account key
+    for row in client.account.iter_history(date_from="2026-10-01"):
+        who = "You" if row.opened_by.is_you else (row.opened_by.name or "Someone")
+        print(row.id, row.opened_at, row.latch.name, who, row.result)
+```
+
+To keep a local copy current, poll with `date_from` set about a minute behind
+the newest row you hold and upsert by `id`, which is stable. A fresh open's
+`result` arrives up to ~18s after the open (it reads `"unknown"` until then),
+so a row you already stored can change.
 
 Directory call events reach an account only once the feature is released for
 it: until then both calls raise `NotFoundError` (`feature_not_enabled`), and

@@ -20,6 +20,11 @@
     },
     {
       "method": "GET",
+      "path": "/v1/account/history",
+      "builder": "account_history"
+    },
+    {
+      "method": "GET",
       "path": "/v1/account/keys",
       "builder": "account_keys"
     },

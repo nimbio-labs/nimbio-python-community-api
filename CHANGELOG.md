@@ -27,6 +27,21 @@ adheres to [Semantic Versioning](https://semver.org/).
   `ACCOUNT_EVENT_TYPES` and `DIRECTORY_CALL_OUTCOMES`; capability
   `directory_call_events` added to `ACCOUNT_KEY_CAPABILITIES`. Errors: 403 `not_account_key`, 404
   `feature_not_enabled` until released for the account, 429 `stream_limit`.
+- **Account open history.** `account.history(*, date_from=None, date_to=None,
+  key_id=None, page=0)` → `OpenHistoryPage` reads `GET /v1/account/history`:
+  opens on every key the account owns, including keys shared from them, newest
+  first, 1000 per page. `account.iter_history()` walks `page` while `has_more`
+  is true, stops on an empty page, and pins the window the first page echoed.
+  Each `AccountOpen` row carries a stable `id` (its log id); a fresh open's
+  `result` is filled in up to ~18s later, so pollers re-read a trailing minute
+  and upsert by `id`. New models `AccountOpen`, `AccountOpenKey`,
+  `AccountOpenLatch`, `AccountOpenedBy`, `AccountOpenGuestLink` (nullable).
+  `open_type` and `result` are open strings; new constants
+  `OPEN_HISTORY_TYPES` / `OPEN_HISTORY_RESULTS` list the known names,
+  including `unknown`. Capability `open_history` added to
+  `ACCOUNT_KEY_CAPABILITIES`. Errors: 404 `key_not_found` /
+  `feature_not_enabled`, 403 `not_account_key` / `oauth_not_permitted`, 400
+  `invalid_window`, 422 `invalid_datetime`.
 
 ## [0.7.0] - 2026-09-01
 

@@ -32,6 +32,7 @@ from .models import (
     AccessLogEntry,
     AccessLogPage,
     AccountKey,
+    AccountOpen,
     BulkResult,
     ChangeLogPage,
     CommunityInfo,
@@ -75,6 +76,7 @@ from .models import (
     NfcTag,
     NfcTagPage,
     NotificationSettings,
+    OpenHistoryPage,
     OpenResult,
     RecurringHoldOpen,
     RecurringHoldOpenRemoved,
@@ -302,6 +304,35 @@ class _AsyncAccount:
                     or page.next_before == before):
                 return
             before = page.next_before
+
+    # -- open history -------------------------------------------------------- #
+
+    async def history(self, *, date_from: Optional[str] = None,
+                      date_to: Optional[str] = None,
+                      key_id: Optional[str] = None,
+                      page: int = 0) -> OpenHistoryPage:
+        """One page of opens on your keys, newest first. Semantics match
+        :meth:`NimbioClient.account.history`."""
+        return await self._c._request(
+            endpoints.account_history(date_from, date_to, key_id, page))
+
+    async def iter_history(self, *, date_from: Optional[str] = None,
+                           date_to: Optional[str] = None,
+                           key_id: Optional[str] = None,
+                           start_page: int = 0) -> AsyncIterator[AccountOpen]:
+        """Yield every open in the window, newest first, across all pages."""
+        page = start_page
+        while True:
+            result = await self.history(date_from=date_from, date_to=date_to,
+                                        key_id=key_id, page=page)
+            for row in result.opens:
+                yield row
+            if not result.has_more or not result.opens:
+                return
+            # Pin the window the first page used; a defaulted "to" would slide.
+            date_from = date_from or result.date_from
+            date_to = date_to or result.date_to
+            page += 1
 
     # -- live events --------------------------------------------------------- #
 

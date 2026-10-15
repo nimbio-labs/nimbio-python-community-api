@@ -87,7 +87,8 @@ GuestView Entry and short codes — NFC tags, sense lines, the map and its
 geofences, logs incl. the configuration change log and key-usage report, and the
 live event stream), and the account surface
 (`client.account.keys()` / `.open()`, added 0.2.0; GuestView call events
-`client.account.stream_events()` / `.directory_calls()`, unreleased). **All 97 documented API
+`client.account.stream_events()` / `.directory_calls()` and open history
+`client.account.history()`, unreleased). **All 98 documented API
 operations are wrapped.** Only the service's hidden `/v1/keys*` / `/v1/calls*`
 endpoints stay unwrapped — call those over plain HTTPS if you need them.
 
@@ -272,6 +273,21 @@ with NimbioClient("nimbio_test_...") as client:
             models.DirectoryCallEnded.from_event(ev).outcome  # OPEN set
     client.account.directory_calls(limit=20, before=None)  # -> DirectoryCallPage
     for call in client.account.iter_directory_calls(): ...  # walks next_before
+
+    # Account key only: opens on YOUR keys (incl. keys you shared), newest first
+    page = client.account.history(date_from="2026-10-01", date_to=None,
+                                  key_id=None, page=0)  # -> OpenHistoryPage
+    page.has_more, page.date_from, page.date_to       # window echoed (90d floor)
+    for row in client.account.iter_history(): ...     # -> AccountOpen
+    row.id                                            # stable log id: UPSERT by it
+    row.opened_by.is_you, row.opened_by.name          # name None only when none is on file
+    row.guest_link                                    # None unless a guest-link open
+    row.open_type, row.result                         # OPEN sets ("open", "opened", "unknown")
+    # 404 key_not_found (key_id not yours); 403 oauth_not_permitted (linked app)
+    # Polling: a fresh open's result lands up to ~18s later ("unknown" until
+    # then). Re-read a trailing minute (date_from = newest stored opened_at
+    # minus 60s) and upsert by row.id; never advance date_from past rows seen.
+    # Known names: OPEN_HISTORY_TYPES, OPEN_HISTORY_RESULTS (open, incl. "unknown").
 ```
 
 `stream_events()` blocks forever by default (auto-reconnect with backoff,
@@ -636,12 +652,16 @@ client.me().key.has_capability("hold_opens")     # or has_capability(caps, "..."
 `short_codes`, `guest_view_entry`, `access_codes`, `guest_links`, `map`,
 `open_notifications`, `settings`, `sense_lines`, `nfc_tags`,
 `access_code_mode`). An account-scoped key has `ACCOUNT_KEY_CAPABILITIES`:
-`open`, plus `directory_call_events` while GuestView call events are released
-for its account.
+`open` and `open_history`, plus `directory_call_events` while GuestView call
+events are released for its account.
 
 `ACCOUNT_EVENT_TYPES` — `directory_call.ringing`, `directory_call.ended`:
 the separate account stream's vocabulary. `DIRECTORY_CALL_OUTCOMES` —
 `opened`, `answered`, `missed`; **open**, so always keep a fallback branch.
+
+`OPEN_HISTORY_TYPES` / `OPEN_HISTORY_RESULTS` — the known `open_type` /
+`result` names on `account.history()` rows (e.g. `open`, `opened`), each
+ending in `unknown`; **open**, like every list here.
 
 `STREAM_EVENT_TYPES` — the ten event types Nimbio delivers. There is **one**
 event vocabulary, not two: a webhook subscribes to names from this same list,

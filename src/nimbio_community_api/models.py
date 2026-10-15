@@ -1755,6 +1755,156 @@ class DirectoryCallPage:
 
 
 # --------------------------------------------------------------------------- #
+# Account open history
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class AccountOpenKey:
+    """The key on *your* account an open is filed under — for an open on a key
+    you shared, your key, not the shared copy that physically opened."""
+
+    id: Optional[str]
+    name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountOpenKey":
+        d = _d(raw)
+        return cls(id=d.get("id"), name=d.get("name"), raw=d)
+
+
+@dataclass
+class AccountOpenLatch:
+    """The gate that was opened."""
+
+    id: Optional[str]
+    name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountOpenLatch":
+        d = _d(raw)
+        return cls(id=d.get("id"), name=d.get("name"), raw=d)
+
+
+@dataclass
+class AccountOpenedBy:
+    """Who opened: ``is_you`` when your own key did; otherwise ``name`` is the
+    opener as the app shows it, or the guest link's label for a guest-link
+    open. No contact details are ever included."""
+
+    is_you: bool
+    name: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountOpenedBy":
+        d = _d(raw)
+        return cls(is_you=bool(d.get("is_you")), name=d.get("name"), raw=d)
+
+
+@dataclass
+class AccountOpenGuestLink:
+    """The guest link an open was made through."""
+
+    id: Optional[int]
+    label: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountOpenGuestLink":
+        d = _d(raw)
+        return cls(id=_int(d.get("id")), label=d.get("label"), raw=d)
+
+
+@dataclass
+class AccountOpen:
+    """One row of :meth:`account.history` — an open on one of your keys,
+    including opens on keys you shared with someone else.
+
+    ``opened_at`` is in the latch's local offset, as the app shows it.
+    ``open_type`` (e.g. ``"open"``; ``"unknown"`` for an unnamed id) and
+    ``result`` (e.g. ``"opened"``) are
+    stable lowercase names but an **open** vocabulary: a newer server may send
+    a value this release does not know, which is passed through unchanged.
+    The raw ``open_type_id`` / ``result_id`` ride along; the known names are
+    :data:`constants.OPEN_HISTORY_TYPES` / :data:`constants.OPEN_HISTORY_RESULTS`.
+
+    ``id`` is the open's stable log id, unique across your history. A fresh
+    open is logged before the gate answers and its ``result`` is filled in up
+    to ~18s later, so to poll, re-read a trailing minute and upsert by ``id``
+    rather than moving ``date_from`` past rows you have already seen.
+    """
+
+    id: Optional[int]
+    opened_at: Optional[str]
+    key: AccountOpenKey
+    latch: AccountOpenLatch
+    opened_by: AccountOpenedBy
+    guest_link: Optional[AccountOpenGuestLink]  # None unless via a guest link
+    open_type: Optional[str]  # open set
+    result: Optional[str]  # open set
+    open_type_id: Optional[int]
+    result_id: Optional[int]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "AccountOpen":
+        d = _d(raw)
+        guest_link = d.get("guest_link")
+        return cls(
+            id=_int(d.get("id")),
+            opened_at=d.get("opened_at"),
+            key=AccountOpenKey.from_dict(d.get("key")),
+            latch=AccountOpenLatch.from_dict(d.get("latch")),
+            opened_by=AccountOpenedBy.from_dict(d.get("opened_by")),
+            guest_link=(AccountOpenGuestLink.from_dict(guest_link)
+                        if isinstance(guest_link, dict) else None),
+            open_type=d.get("open_type"),
+            result=d.get("result"),
+            open_type_id=_int(d.get("open_type_id")),
+            result_id=_int(d.get("result_id")),
+            raw=d,
+        )
+
+
+@dataclass
+class OpenHistoryPage:
+    """Result of :meth:`account.history` — one page (up to 1000 rows) of
+    opens, newest first across all your keys.
+
+    ``date_from``/``date_to`` echo the effective window (the server clamps
+    ``from`` to the 90-day retention floor). Ask for ``page + 1`` while
+    ``has_more`` is true, or let :meth:`account.iter_history` do it.
+    """
+
+    opens: List[AccountOpen]
+    page: Optional[int]
+    has_more: bool
+    date_from: Optional[str]
+    date_to: Optional[str]
+    raw: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    def __iter__(self):
+        return iter(self.opens)
+
+    def __len__(self) -> int:
+        return len(self.opens)
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "OpenHistoryPage":
+        d = _d(raw)
+        return cls(
+            opens=[AccountOpen.from_dict(x) for x in (d.get("opens") or [])],
+            page=_int(d.get("page")),
+            has_more=bool(d.get("has_more")),
+            date_from=d.get("from"),
+            date_to=d.get("to"),
+            raw=d,
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Key access schedules
 # --------------------------------------------------------------------------- #
 

@@ -379,6 +379,20 @@ class endpoints:
                 _m.DirectoryCallPage.from_dict)
 
     @staticmethod
+    def account_history(date_from: Optional[str] = None,
+                        date_to: Optional[str] = None,
+                        key_id: Optional[str] = None, page: int = 0):
+        params: dict = {"page": page}
+        if date_from is not None:
+            params["from"] = date_from
+        if date_to is not None:
+            params["to"] = date_to
+        if key_id is not None:
+            params["key_id"] = key_id
+        return ("GET", "/v1/account/history", params, None,
+                _m.OpenHistoryPage.from_dict)
+
+    @staticmethod
     def info():
         return "GET", "/v1/community", None, None, _m.CommunityInfo.from_dict
 

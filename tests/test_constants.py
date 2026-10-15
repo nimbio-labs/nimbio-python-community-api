@@ -5,6 +5,9 @@ typo there is a silent False, not an error — so what matters is that the names
 are exactly the server's and that nothing here rejects a value it has not seen.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from nimbio_community_api import (
@@ -50,7 +53,8 @@ def test_the_public_namespace_is_only_the_intended_names():
     needs must not sit in the listing alongside the vocabularies."""
     expected = ["CAPABILITIES", "ACCOUNT_KEY_CAPABILITIES",
                 "STREAM_EVENT_TYPES", "ACCOUNT_EVENT_TYPES",
-                "DIRECTORY_CALL_OUTCOMES", "GUEST_LINK_TYPES", "GUEST_LINK_STATES",
+                "DIRECTORY_CALL_OUTCOMES", "OPEN_HISTORY_TYPES",
+                "OPEN_HISTORY_RESULTS", "GUEST_LINK_TYPES", "GUEST_LINK_STATES",
                 "GEOFENCE_MODES", "CHANGE_LOG_TYPES", "KEY_USAGE_REPORT_TYPES",
                 "has_capability"]
     assert constants.__all__ == expected
@@ -59,9 +63,10 @@ def test_the_public_namespace_is_only_the_intended_names():
         assert hasattr(constants, name)
 
 
-def test_account_keys_get_open_and_directory_call_events():
-    assert constants.ACCOUNT_KEY_CAPABILITIES == ("open", "directory_call_events")
-    # "open" is shared; directory_call_events is account-only.
+def test_account_keys_get_open_directory_call_events_and_open_history():
+    assert constants.ACCOUNT_KEY_CAPABILITIES == (
+        "open", "directory_call_events", "open_history")
+    # "open" is shared; the other two are account-only.
     assert set(constants.ACCOUNT_KEY_CAPABILITIES) & set(CAPABILITIES) == {"open"}
 
 
@@ -79,7 +84,9 @@ def test_account_stream_vocabularies():
                                         constants.CHANGE_LOG_TYPES,
                                         constants.KEY_USAGE_REPORT_TYPES,
                                         constants.ACCOUNT_EVENT_TYPES,
-                                        constants.DIRECTORY_CALL_OUTCOMES])
+                                        constants.DIRECTORY_CALL_OUTCOMES,
+                                        constants.OPEN_HISTORY_TYPES,
+                                        constants.OPEN_HISTORY_RESULTS])
 def test_the_vocabularies_are_immutable(vocabulary):
     """Callers reference these; a caller must not be able to edit them for
     everyone else in the process."""
@@ -114,3 +121,35 @@ def test_api_key_info_answers_for_itself():
 
 def test_a_key_that_reported_no_capabilities_has_none():
     assert models.ApiKeyInfo.from_dict({}).has_capability("open") is False
+
+
+def test_open_history_vocabularies():
+    """The contract's id -> name maps, in id order, plus ``unknown``."""
+    assert constants.OPEN_HISTORY_TYPES == (
+        "open", "do_not_open", "emergency_open", "emergency_fail",
+        "doorbell_or_emergency_prompt", "bluetooth_unlock", "bluetooth_lock",
+        "unlock", "do_not_unlock", "lock", "do_not_lock", "unknown")
+    assert constants.OPEN_HISTORY_RESULTS == (
+        "opened", "did_not_open", "locked", "did_not_lock",
+        "fail_open_trying_bluetooth", "fail_lock_trying_bluetooth",
+        "unlock_bluetooth", "lock_bluetooth", "fail_lock_bluetooth",
+        "fail_unlock_bluetooth", "unused_bluetooth", "lock_already_unlocked",
+        "lock_already_locked", "unlocked", "did_not_unlock", "unknown")
+    for vocab in (constants.OPEN_HISTORY_TYPES, constants.OPEN_HISTORY_RESULTS):
+        assert len(set(vocab)) == len(vocab)
+
+
+_NPM_CONSTANTS = (Path(__file__).resolve().parents[2]
+                  / "nimbio-npm-community-api" / "src" / "constants.ts")
+
+
+@pytest.mark.parametrize("name", ["OPEN_HISTORY_TYPES", "OPEN_HISTORY_RESULTS"])
+def test_open_history_vocabularies_match_the_npm_sdk(name):
+    """The two SDKs are peers; a vocabulary must not drift between them. Runs
+    only where the npm SDK is checked out alongside this repo."""
+    if not _NPM_CONSTANTS.is_file():
+        pytest.skip("nimbio-npm-community-api is not checked out alongside")
+    m = re.search(rf"export const {name} = Object\.freeze\(\[(.*?)\]",
+                  _NPM_CONSTANTS.read_text(encoding="utf-8"), re.S)
+    assert m, f"{name} not found in the npm SDK"
+    assert tuple(re.findall(r'"([^"]+)"', m.group(1))) == getattr(constants, name)

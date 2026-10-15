@@ -32,6 +32,8 @@ __all__ = [
     "STREAM_EVENT_TYPES",
     "ACCOUNT_EVENT_TYPES",
     "DIRECTORY_CALL_OUTCOMES",
+    "OPEN_HISTORY_TYPES",
+    "OPEN_HISTORY_RESULTS",
     "GUEST_LINK_TYPES",
     "GUEST_LINK_STATES",
     "GEOFENCE_MODES",
@@ -83,12 +85,14 @@ CAPABILITIES: Tuple[str, ...] = (
     "access_code_mode",
 )
 
-#: The capabilities an account-scoped key can have. ``open`` is always there;
+#: The capabilities an account-scoped key can have. ``open`` and
+#: ``open_history`` (``account.history()``) are always there;
 #: ``directory_call_events`` appears only while directory call events
 #: (``account.stream_events()`` / ``account.directory_calls()``) are released
 #: for that account, so check for it rather than assuming. Community-scoped
-#: keys get every entry in :data:`CAPABILITIES` and never this one.
-ACCOUNT_KEY_CAPABILITIES: Tuple[str, ...] = ("open", "directory_call_events")
+#: keys get every entry in :data:`CAPABILITIES` and never the account-only ones.
+ACCOUNT_KEY_CAPABILITIES: Tuple[str, ...] = ("open", "directory_call_events",
+                                             "open_history")
 
 
 # --------------------------------------------------------------------------- #
@@ -146,6 +150,46 @@ DIRECTORY_CALL_OUTCOMES: Tuple[str, ...] = (
     "opened",
     "answered",
     "missed",
+)
+
+#: An ``account.history()`` row's ``open_type``: the kind of action, not where
+#: the open came from. ``unknown`` stands in for an id the server has no name
+#: for. **Open:** a newer server may add a value, passed through unchanged.
+OPEN_HISTORY_TYPES: Tuple[str, ...] = (
+    "open",
+    "do_not_open",
+    "emergency_open",
+    "emergency_fail",
+    "doorbell_or_emergency_prompt",
+    "bluetooth_unlock",
+    "bluetooth_lock",
+    "unlock",
+    "do_not_unlock",
+    "lock",
+    "do_not_lock",
+    "unknown",
+)
+
+#: An ``account.history()`` row's ``result``. ``unknown`` means no result was
+#: recorded (yet — a fresh open's result lands up to ~18s later). **Open**,
+#: like :data:`OPEN_HISTORY_TYPES`.
+OPEN_HISTORY_RESULTS: Tuple[str, ...] = (
+    "opened",
+    "did_not_open",
+    "locked",
+    "did_not_lock",
+    "fail_open_trying_bluetooth",
+    "fail_lock_trying_bluetooth",
+    "unlock_bluetooth",
+    "lock_bluetooth",
+    "fail_lock_bluetooth",
+    "fail_unlock_bluetooth",
+    "unused_bluetooth",
+    "lock_already_unlocked",
+    "lock_already_locked",
+    "unlocked",
+    "did_not_unlock",
+    "unknown",
 )
 
 

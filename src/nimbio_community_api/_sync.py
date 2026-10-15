@@ -24,6 +24,7 @@ from .models import (
     AccessLogEntry,
     AccessLogPage,
     AccountKey,
+    AccountOpen,
     BulkResult,
     ChangeLogPage,
     CommunityInfo,
@@ -67,6 +68,7 @@ from .models import (
     NfcTag,
     NfcTagPage,
     NotificationSettings,
+    OpenHistoryPage,
     OpenResult,
     RecurringHoldOpen,
     RecurringHoldOpenRemoved,
@@ -310,6 +312,43 @@ class _SyncAccount:
                     or page.next_before == before):
                 return
             before = page.next_before
+
+    # -- open history -------------------------------------------------------- #
+
+    def history(self, *, date_from: Optional[str] = None,
+                date_to: Optional[str] = None, key_id: Optional[str] = None,
+                page: int = 0) -> OpenHistoryPage:
+        """One page (1000 rows) of opens on your keys, newest first — the
+        app's History tab, including opens on keys you shared.
+
+        ``date_from``/``date_to`` take a ``'YYYY-MM-DD'`` date or an ISO-8601
+        datetime (naive is UTC); omit both for the last 90 days. ``from`` is
+        clamped to the 90-day retention floor and the page echoes the window
+        it used. ``key_id`` narrows to one of your keys (``NotFoundError``,
+        ``key_not_found``, otherwise). A bad datetime is a 422
+        (``invalid_datetime``); a linked-app token gets
+        :class:`PermissionDeniedError` (``oauth_not_permitted``)."""
+        return self._c._request(
+            endpoints.account_history(date_from, date_to, key_id, page))
+
+    def iter_history(self, *, date_from: Optional[str] = None,
+                     date_to: Optional[str] = None,
+                     key_id: Optional[str] = None,
+                     start_page: int = 0) -> Iterator[AccountOpen]:
+        """Yield every open in the window, newest first, walking pages until
+        ``has_more`` is false or a page comes back empty."""
+        page = start_page
+        while True:
+            result = self.history(date_from=date_from, date_to=date_to,
+                                  key_id=key_id, page=page)
+            yield from result.opens
+            if not result.has_more or not result.opens:
+                return
+            # Pin the window the first page used: a defaulted "to" of now would
+            # otherwise slide between pages and shift rows across the boundary.
+            date_from = date_from or result.date_from
+            date_to = date_to or result.date_to
+            page += 1
 
     # -- live events --------------------------------------------------------- #
 
