@@ -636,7 +636,7 @@ It is **read-only on purpose**. The setter behind it narrows what a link type
 may ever cover, which makes it a safety control rather than a configuration
 knob, so exposing it to API callers was deliberately deferred — not forgotten.
 
-> **An API key can mint an `event` link even when the community has event keys
+> **An API key can mint an `event` link even when the community has event links
 > switched off.** That switch aims at *members* — it stops members minting event
 > links — and has never applied to a manager acting on the management surface,
 > so a settings flip cannot break links a manager handed out for tonight. An API

@@ -399,7 +399,7 @@ async with AsyncNimbioClient("nimbio_test_...") as client:
   Naming an excluded gate is a 422, so check first. It is **read-only on
   purpose**: the setter narrows what a link type may ever cover, which makes it
   a safety control, so exposing it was deliberately deferred — not a gap.
-- **An API key can mint an `event` link even when the community has event keys
+- **An API key can mint an `event` link even when the community has event links
   switched off.** That switch aims at *members*; a manager on the management
   surface was always exempt, and an API key inherits the carve-out. **A real
   widening** — to honour the community setting, read `features.event_keys` from

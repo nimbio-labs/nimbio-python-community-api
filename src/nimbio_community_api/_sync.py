@@ -797,7 +797,7 @@ class _SyncCommunity:
         ``allow_hold_opens`` false 403s the whole hold-open family;
         ``is_open_log_history_enabled`` false 403s :meth:`access_log` and
         :meth:`gate_status_log`; ``allow_guest_view_entry`` gates GuestView
-        Entry. ``event_keys_enabled`` is the *resolved* answer for event keys,
+        Entry. ``event_keys_enabled`` is the *resolved* answer for event links,
         combining the settable ``event_keys_override``
         (``inherit``/``allow``/``deny``) with the property type's default.
         ``access_code_mode`` (``per_member`` / ``single_entry``) is the one
@@ -850,7 +850,7 @@ class _SyncCommunity:
 
         **These settings change what the rest of the API does.** Turning
         ``allow_directory_viewing`` off makes the directory disappear for
-        members and guests; ``event_keys_override="deny"`` stops event keys
+        members and guests; ``event_keys_override="deny"`` stops event links
         working community-wide whatever the property type allows.
 
         Test keys validate the whole patch and return ``.simulated`` with the
@@ -1114,7 +1114,7 @@ class _SyncCommunity:
         excluded gate is a 422.
 
         **An API key can mint an ``event`` link even when the community has
-        event keys switched off.** That switch aims at *members* — it stops
+        event links switched off.** That switch aims at *members* — it stops
         members minting event links — and has never applied to a manager acting
         on the management surface, so a settings flip cannot break links a
         manager handed out for tonight; an API key inherits the carve-out. This

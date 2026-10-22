@@ -2069,7 +2069,7 @@ class CommunitySettings:
     only way to learn a feature is off is to call it and read a 403. Use
     :meth:`feature` rather than indexing.
 
-    ``read_only.event_keys_enabled`` is the *resolved* answer for event keys —
+    ``read_only.event_keys_enabled`` is the *resolved* answer for event links —
     the settable ``settings["event_keys_override"]``
     (``inherit``/``allow``/``deny``) combined with the property type's default.
 

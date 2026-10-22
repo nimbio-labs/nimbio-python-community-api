@@ -110,7 +110,7 @@ def test_read_only_flags_are_how_you_learn_a_feature_is_off(client):
     s = client.community.settings()
     assert s.feature("allow_hold_opens") is True
     assert s.feature("is_open_log_history_enabled") is False
-    # The resolved answer for event keys, not the settable override.
+    # The resolved answer for event links, not the settable override.
     assert s.feature("event_keys_enabled") is True
     assert s.setting("event_keys_override") == "inherit"
     assert s.feature("a_flag_this_release_never_heard_of") is False
